@@ -28,7 +28,8 @@
     "match_sender_contains": "printernet.co.il",
     "match_subject_contains": "פזגז",
     "seller": "פזגז",
-    "product": "חשבונית גז"
+    "product": "חשבונית גז",
+    "category": "חשבנות/גז"
   },
   {
     "_comment": "אל על — כרטיסי טיסה",

@@ -19,8 +19,11 @@ C:\Users\ofeks\OneDrive\Documents\קבלות\
 │   │   └── YYYY_MM_DD - Seller - Product - [account]\
 │   ├── ארנונה\                          ← municipal tax (עיריית ראשון לציון)
 │   │   └── YYYY_MM_DD - Seller - Product - [account]\
-│   └── אינטרנט\                         ← internet (סלקום)
+│   ├── אינטרנט\                         ← internet (סלקום)
+│   │   └── YYYY_MM_DD - Seller - Product - [account]\
+│   └── גז\                              ← gas (פזגז)
 │       └── YYYY_MM_DD - Seller - Product - [account]\
+
 │
 ├── YYYY_MM_DD - Seller - Product - [account]\   ← uncategorized receipts
 │   ├── attachment.pdf
@@ -176,7 +179,7 @@ These were added through manual review sessions with Claude:
 | `ladpc.co.il` | — | עיריית ראשון לציון | אישור תשלום | חשבנות/ארנונה |
 | `icount.co.il` | יפנולוגי | יפנולוגי | חשבונית מס קבלה | יפנולוגי |
 | `electra-power.co.il` | — | אלקטרה פאוור | חשבונית חשמל | חשבנות/חשמל |
-| `printernet.co.il` | פזגז | פזגז | חשבונית גז | — |
+| `printernet.co.il` | פזגז | פזגז | חשבונית גז | חשבנות/גז |
 | `elalinfo.co.il` | — | אל על | כרטיס טיסה | — |
 
 ---
@@ -311,6 +314,7 @@ Receipts can be routed into subcategories under `קבלות\חשבנות\`:
 | `חשבנות/מיים` | מיים | Water bills |
 | `חשבנות/ארנונה` | ארנונה | Municipal tax |
 | `חשבנות/אינטרנט` | אינטרנט | Internet bills |
+| `חשבנות/גז` | גז | Gas bills |
 
 Both hardcoded rules (4th tuple element) and custom rules (`category` field) support categories.
 
