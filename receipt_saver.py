@@ -130,9 +130,9 @@ def extract_display_name(sender: str) -> str:
 def parse_date(date_raw: str) -> str:
     try:
         from email.utils import parsedate_to_datetime
-        return parsedate_to_datetime(date_raw).strftime("%Y-%m-%d")
+        return parsedate_to_datetime(date_raw).strftime("%Y_%m_%d")
     except Exception:
-        return datetime.date.today().isoformat()
+        return datetime.date.today().strftime("%Y_%m_%d")
 
 def sender_contains(sender: str, *fragments: str) -> bool:
     return any(f in sender.lower() for f in fragments)

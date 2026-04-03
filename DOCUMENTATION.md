@@ -14,28 +14,28 @@ C:\Users\ofeks\OneDrive\Documents\קבלות\
 │
 ├── חשבנות\                              ← utility bills category
 │   ├── חשמל\                            ← electricity (אלקטרה פאוור)
-│   │   └── YYYY-MM-DD - Seller - Product - [account]\
+│   │   └── YYYY_MM_DD - Seller - Product - [account]\
 │   ├── מיים\                            ← water
-│   │   └── YYYY-MM-DD - Seller - Product - [account]\
+│   │   └── YYYY_MM_DD - Seller - Product - [account]\
 │   ├── ארנונה\                          ← municipal tax (עיריית ראשון לציון)
-│   │   └── YYYY-MM-DD - Seller - Product - [account]\
+│   │   └── YYYY_MM_DD - Seller - Product - [account]\
 │   └── אינטרנט\                         ← internet (סלקום)
-│       └── YYYY-MM-DD - Seller - Product - [account]\
+│       └── YYYY_MM_DD - Seller - Product - [account]\
 │
-├── YYYY-MM-DD - Seller - Product - [account]\   ← uncategorized receipts
+├── YYYY_MM_DD - Seller - Product - [account]\   ← uncategorized receipts
 │   ├── attachment.pdf
 │   ├── attachment2.pdf
 │   └── email.pdf                        ← always present, printout of the email
 │
 └── _לטיפול ידני\                        ← fallback folder
-    └── YYYY-MM-DD - Sender - Subject - [account]\
+    └── YYYY_MM_DD - Sender - Subject - [account]\
         ├── attachment.pdf
         └── email.pdf
 ```
 
 ### Folder Naming Format
 ```
-YYYY-MM-DD - Seller Name - Product Description - [account]
+YYYY_MM_DD - Seller Name - Product Description - [account]
 ```
 
 **Account labels:**
@@ -45,10 +45,10 @@ YYYY-MM-DD - Seller Name - Product Description - [account]
 
 **Examples:**
 ```
-2026-03-25 - סלקום - חשבונית חודשית - ofek
-2026-03-20 - Wolt - Shi-Shi - family
-2026-03-13 - יפנולוגי - חשבונית מס קבלה - ofek
-2026-04-02 - אלקטרה פאוור - חשבונית חשמל - family
+2026_03_25 - סלקום - חשבונית חודשית - ofek
+2026_03_20 - Wolt - Shi-Shi - family
+2026_03_13 - יפנולוגי - חשבונית מס קבלה - ofek
+2026_04_02 - אלקטרה פאוור - חשבונית חשמל - family
 ```
 
 ---
@@ -324,10 +324,10 @@ Both hardcoded rules (4th tuple element) and custom rules (`category` field) sup
     "message_id": "19cd976b02585b03",
     "account": "ofek",
     "account_email": "ofek.shmuel1@gmail.com",
-    "date": "2026-03-10",
+    "date": "2026_03_10",
     "sender": "noreply@somesite.co.il",
     "subject": "אישור תשלום",
-    "folder_name": "2026-03-10 - noreply - אישור תשלום - ofek",
+    "folder_name": "2026_03_10 - noreply - אישור תשלום - ofek",
     "folder_path": "C:\\Users\\ofeks\\OneDrive\\Documents\\קבלות\\_לטיפול ידני\\...",
     "resolved": false
   }
