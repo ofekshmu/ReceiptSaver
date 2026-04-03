@@ -174,7 +174,7 @@ These were added through manual review sessions with Claude:
 | Sender Domain | Subject Contains | Seller | Product | Category |
 |---------------|-----------------|--------|---------|----------|
 | `ladpc.co.il` | — | עיריית ראשון לציון | אישור תשלום | חשבנות/ארנונה |
-| `icount.co.il` | יפנולוגי | יפנולוגי | חשבונית מס קבלה | — |
+| `icount.co.il` | יפנולוגי | יפנולוגי | חשבונית מס קבלה | יפנולוגי |
 | `electra-power.co.il` | — | אלקטרה פאוור | חשבונית חשמל | חשבנות/חשמל |
 | `printernet.co.il` | פזגז | פזגז | חשבונית גז | — |
 | `elalinfo.co.il` | — | אל על | כרטיס טיסה | — |

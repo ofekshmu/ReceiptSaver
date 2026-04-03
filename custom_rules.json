@@ -12,7 +12,8 @@
     "match_sender_contains": "icount.co.il",
     "match_subject_contains": "יפנולוגי",
     "seller": "יפנולוגי",
-    "product": "חשבונית מס קבלה"
+    "product": "חשבונית מס קבלה",
+    "category": "יפנולוגי"
   },
   {
     "_comment": "אלקטרה פאוור — חשבונית חשמל",
