@@ -1,0 +1,37 @@
+[
+  {
+    "_comment": "עיריית ראשון לציון — ביט תשלומים",
+    "match_sender_contains": "ladpc.co.il",
+    "match_subject_contains": null,
+    "seller": "עיריית ראשון לציון",
+    "product": "אישור תשלום"
+  },
+  {
+    "_comment": "iCount invoicing platform — יפנולוגי",
+    "match_sender_contains": "icount.co.il",
+    "match_subject_contains": "יפנולוגי",
+    "seller": "יפנולוגי",
+    "product": "חשבונית מס קבלה"
+  },
+  {
+    "_comment": "אלקטרה פאוור — חשבונית חשמל",
+    "match_sender_contains": "electra-power.co.il",
+    "match_subject_contains": null,
+    "seller": "אלקטרה פאוור",
+    "product": "חשבונית חשמל"
+  },
+  {
+    "_comment": "פזגז — חשבונית גז",
+    "match_sender_contains": "printernet.co.il",
+    "match_subject_contains": "פזגז",
+    "seller": "פזגז",
+    "product": "חשבונית גז"
+  },
+  {
+    "_comment": "אל על — כרטיסי טיסה",
+    "match_sender_contains": "elalinfo.co.il",
+    "match_subject_contains": null,
+    "seller": "אל על",
+    "product": "כרטיס טיסה"
+  }
+]

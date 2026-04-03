@@ -1,0 +1,15 @@
+# Secrets — never commit
+secrets.py
+credentials_*.json
+token_*.json
+ticktick_token.json
+
+# Runtime state
+processed_ids.json
+fallback_log.json
+receipt_saver.log
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
