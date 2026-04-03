@@ -4,7 +4,8 @@
     "match_sender_contains": "ladpc.co.il",
     "match_subject_contains": null,
     "seller": "עיריית ראשון לציון",
-    "product": "אישור תשלום"
+    "product": "אישור תשלום",
+    "category": "חשבנות/ארנונה"
   },
   {
     "_comment": "iCount invoicing platform — יפנולוגי",
@@ -18,7 +19,8 @@
     "match_sender_contains": "electra-power.co.il",
     "match_subject_contains": null,
     "seller": "אלקטרה פאוור",
-    "product": "חשבונית חשמל"
+    "product": "חשבונית חשמל",
+    "category": "חשבנות/חשמל"
   },
   {
     "_comment": "פזגז — חשבונית גז",

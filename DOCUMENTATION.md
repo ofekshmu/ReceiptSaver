@@ -12,7 +12,17 @@ Receipt Saver is an automated Python-based system that runs on Windows startup a
 ```
 C:\Users\ofeks\OneDrive\Documents\קבלות\
 │
-├── YYYY-MM-DD - Seller - Product - [account]\
+├── חשבנות\                              ← utility bills category
+│   ├── חשמל\                            ← electricity (אלקטרה פאוור)
+│   │   └── YYYY-MM-DD - Seller - Product - [account]\
+│   ├── מיים\                            ← water
+│   │   └── YYYY-MM-DD - Seller - Product - [account]\
+│   ├── ארנונה\                          ← municipal tax (עיריית ראשון לציון)
+│   │   └── YYYY-MM-DD - Seller - Product - [account]\
+│   └── אינטרנט\                         ← internet (סלקום)
+│       └── YYYY-MM-DD - Seller - Product - [account]\
+│
+├── YYYY-MM-DD - Seller - Product - [account]\   ← uncategorized receipts
 │   ├── attachment.pdf
 │   ├── attachment2.pdf
 │   └── email.pdf                        ← always present, printout of the email
@@ -142,32 +152,32 @@ KNOWN PATH:
 
 These are permanent rules that never need updating:
 
-| Sender Domain | Seller Name | Product | Notes |
-|---------------|-------------|---------|-------|
-| `wolt.com` | Wolt | Restaurant name | Extracted from attachment filename |
-| `ksp.co.il` | KSP | חשבונית וקבלה | Electronics store |
-| `paneco.com` | פאנקו | הזמנה | Wine/drinks store |
-| `cellcominv.co.il` | סלקום | חשבונית חודשית | Monthly phone bill |
-| `yesplanet.co.il` | Yes Planet | כרטיסים | Cinema tickets |
-| `mhc.org.il` | מדיטק | הזמנה | Culture center |
-| `israelpost.co.il` | דואר ישראל | Extracted from subject | Israel Post |
-| `cardcom.co.il` | Extracted from subject | Extracted from subject | Generic Israeli invoicing platform |
-| `flymoney.com` | FlyMoney | מט"ח | Currency exchange |
-| `fattal.co.il` / NYX | Display name from sender | חשבונית | Fattal hotel chain |
-| `stripe.com` | Extracted from subject | מנוי | Stripe-powered subscriptions |
-| `icount.co.il` | Extracted from subject | חשבונית מס קבלה | **Special handling** — see iCount section |
+| Sender Domain | Seller Name | Product | Category | Notes |
+|---------------|-------------|---------|----------|-------|
+| `wolt.com` | Wolt | Restaurant name | — | Extracted from attachment filename |
+| `ksp.co.il` | KSP | חשבונית וקבלה | — | Electronics store |
+| `paneco.com` | פאנקו | הזמנה | — | Wine/drinks store |
+| `cellcominv.co.il` | סלקום | חשבונית חודשית | חשבנות/אינטרנט | Monthly internet bill |
+| `yesplanet.co.il` | Yes Planet | כרטיסים | — | Cinema tickets |
+| `mhc.org.il` | מדיטק | הזמנה | — | Culture center |
+| `israelpost.co.il` | דואר ישראל | Extracted from subject | — | Israel Post |
+| `cardcom.co.il` | Extracted from subject | Extracted from subject | — | Generic Israeli invoicing platform |
+| `flymoney.com` | FlyMoney | מט"ח | — | Currency exchange |
+| `fattal.co.il` / NYX | Display name from sender | חשבונית | — | Fattal hotel chain |
+| `stripe.com` | Extracted from subject | מנוי | — | Stripe-powered subscriptions |
+| `icount.co.il` | Extracted from subject | חשבונית מס קבלה | — | **Special handling** — see iCount section |
 
 ### Custom Rules (in custom_rules.json)
 
 These were added through manual review sessions with Claude:
 
-| Sender Domain | Subject Contains | Seller | Product |
-|---------------|-----------------|--------|---------|
-| `ladpc.co.il` | — | עיריית ראשון לציון | אישור תשלום |
-| `icount.co.il` | יפנולוגי | יפנולוגי | חשבונית מס קבלה |
-| `electra-power.co.il` | — | אלקטרה פאוור | חשבונית חשמל |
-| `printernet.co.il` | פזגז | פזגז | חשבונית גז |
-| `elalinfo.co.il` | — | אל על | כרטיס טיסה |
+| Sender Domain | Subject Contains | Seller | Product | Category |
+|---------------|-----------------|--------|---------|----------|
+| `ladpc.co.il` | — | עיריית ראשון לציון | אישור תשלום | חשבנות/ארנונה |
+| `icount.co.il` | יפנולוגי | יפנולוגי | חשבונית מס קבלה | — |
+| `electra-power.co.il` | — | אלקטרה פאוור | חשבונית חשמל | חשבנות/חשמל |
+| `printernet.co.il` | פזגז | פזגז | חשבונית גז | — |
+| `elalinfo.co.il` | — | אל על | כרטיס טיסה | — |
 
 ---
 
@@ -279,7 +289,8 @@ Since Claude has Gmail MCP access to your `ofek` account, you can ask things lik
     "match_sender_contains": "domain.co.il",
     "match_subject_contains": null,
     "seller": "Seller Name",
-    "product": "Product Description"
+    "product": "Product Description",
+    "category": "חשבנות/חשמל"
   }
 ]
 ```
@@ -288,6 +299,20 @@ Since Claude has Gmail MCP access to your `ofek` account, you can ask things lik
 - `match_subject_contains` — optional, substring match on the subject line (use when same platform sends for multiple sellers, e.g. iCount)
 - `seller` — the name that appears in the folder
 - `product` — the product/service description in the folder name
+- `category` — optional, subdirectory path under `קבלות\` (e.g. `חשבנות/חשמל`). Omit or set to `null` for uncategorized receipts.
+
+### Categories
+
+Receipts can be routed into subcategories under `קבלות\חשבנות\`:
+
+| Category path | Hebrew | Description |
+|---------------|--------|-------------|
+| `חשבנות/חשמל` | חשמל | Electricity bills |
+| `חשבנות/מיים` | מיים | Water bills |
+| `חשבנות/ארנונה` | ארנונה | Municipal tax |
+| `חשבנות/אינטרנט` | אינטרנט | Internet bills |
+
+Both hardcoded rules (4th tuple element) and custom rules (`category` field) support categories.
 
 ---
 

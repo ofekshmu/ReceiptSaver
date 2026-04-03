@@ -169,25 +169,26 @@ def _stripe_seller(sender, subject):
     return sanitize(m.group(1).strip()) if m else extract_display_name(sender)
 
 KNOWN_RULES = [
-    (lambda s, sub: sender_contains(s, "wolt.com"),         "Wolt",               _wolt_product),
-    (lambda s, sub: sender_contains(s, "ksp.co.il"),        "KSP",                lambda sub, att: "חשבונית וקבלה"),
-    (lambda s, sub: sender_contains(s, "paneco.com"),       "פאנקו",              lambda sub, att: "הזמנה"),
-    (lambda s, sub: sender_contains(s, "cellcominv.co.il"), "סלקום",              lambda sub, att: "חשבונית חודשית"),
-    (lambda s, sub: sender_contains(s, "yesplanet.co.il"),  "Yes Planet",         lambda sub, att: "כרטיסים"),
-    (lambda s, sub: sender_contains(s, "mhc.org.il"),       "מדיטק",              lambda sub, att: "הזמנה"),
-    (lambda s, sub: sender_contains(s, "israelpost.co.il"), "דואר ישראל",         _israelpost_product),
-    (lambda s, sub: sender_contains(s, "cardcom.co.il"),    _cardcom_seller,      _cardcom_product),
-    (lambda s, sub: sender_contains(s, "flymoney.com"),     "FlyMoney",           lambda sub, att: 'מט"ח'),
+    # (match_fn, seller, product_fn, category_or_None)
+    (lambda s, sub: sender_contains(s, "wolt.com"),         "Wolt",               _wolt_product,                       None),
+    (lambda s, sub: sender_contains(s, "ksp.co.il"),        "KSP",                lambda sub, att: "חשבונית וקבלה",   None),
+    (lambda s, sub: sender_contains(s, "paneco.com"),       "פאנקו",              lambda sub, att: "הזמנה",            None),
+    (lambda s, sub: sender_contains(s, "cellcominv.co.il"), "סלקום",              lambda sub, att: "חשבונית חודשית",  "חשבנות/אינטרנט"),
+    (lambda s, sub: sender_contains(s, "yesplanet.co.il"),  "Yes Planet",         lambda sub, att: "כרטיסים",         None),
+    (lambda s, sub: sender_contains(s, "mhc.org.il"),       "מדיטק",              lambda sub, att: "הזמנה",            None),
+    (lambda s, sub: sender_contains(s, "israelpost.co.il"), "דואר ישראל",         _israelpost_product,                 None),
+    (lambda s, sub: sender_contains(s, "cardcom.co.il"),    _cardcom_seller,      _cardcom_product,                    None),
+    (lambda s, sub: sender_contains(s, "flymoney.com"),     "FlyMoney",           lambda sub, att: 'מט"ח',             None),
     (lambda s, sub: sender_contains(s, "fattal.co.il") or "nyx" in sub.lower(),
-                                                             extract_display_name, lambda sub, att: "חשבונית"),
-    (lambda s, sub: sender_contains(s, "stripe.com"),       _stripe_seller,       lambda sub, att: "מנוי"),
+                                                             extract_display_name, lambda sub, att: "חשבונית",         None),
+    (lambda s, sub: sender_contains(s, "stripe.com"),       _stripe_seller,       lambda sub, att: "מנוי",             None),
 ]
 
 def match_hardcoded(sender: str, subject: str):
-    for match_fn, seller_val, product_fn in KNOWN_RULES:
+    for match_fn, seller_val, product_fn, category in KNOWN_RULES:
         if match_fn(sender, subject):
             seller = seller_val(sender, subject) if callable(seller_val) else seller_val
-            return seller, product_fn
+            return seller, product_fn, category
     return None
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -310,7 +311,7 @@ def match_custom(sender: str, subject: str):
         sender_ok  = sender_frag.lower()  in sender.lower()  if sender_frag  else True
         subject_ok = subject_frag.lower() in subject.lower() if subject_frag else True
         if sender_ok and subject_ok:
-            return rule["seller"], rule["product"]
+            return rule["seller"], rule["product"], rule.get("category")
     return None
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -451,8 +452,12 @@ def process_message(service, msg_id: str, account: dict) -> dict:
         m = re.search(r"מאת\s+(.+?)$", subject)
         seller  = sanitize(m.group(1).strip()) if m else "iCount"
         product = "חשבונית מס קבלה"
+        # Check custom rules for a category override
+        custom_match = match_custom(sender, subject)
+        category = custom_match[2] if custom_match else None
+        base_dir    = RECEIPTS_DIR / category if category else RECEIPTS_DIR
         folder_name = f"{date_str} - {seller} - {product} - {label}"
-        folder      = RECEIPTS_DIR / folder_name
+        folder      = base_dir / folder_name
         folder.mkdir(parents=True, exist_ok=True)
         log.info(f"[ICOUNT]   {folder_name}")
         save_email_pdf(msg["payload"], folder, subject, sender, date_str)
@@ -462,10 +467,11 @@ def process_message(service, msg_id: str, account: dict) -> dict:
     # ── Step 1: hardcoded rules ────────────────────────────────────────────
     rule = match_hardcoded(sender, subject)
     if rule:
-        seller, product_fn = rule
+        seller, product_fn, category = rule
         product     = sanitize(product_fn(subject, first_att))
+        base_dir    = RECEIPTS_DIR / category if category else RECEIPTS_DIR
         folder_name = f"{date_str} - {seller} - {product} - {label}"
-        folder      = RECEIPTS_DIR / folder_name
+        folder      = base_dir / folder_name
         folder.mkdir(parents=True, exist_ok=True)
         log.info(f"[KNOWN]    {folder_name}")
         save_attachments(service, msg_id, msg["payload"], folder)
@@ -475,9 +481,10 @@ def process_message(service, msg_id: str, account: dict) -> dict:
     # ── Step 2: custom rules ───────────────────────────────────────────────
     custom = match_custom(sender, subject)
     if custom:
-        seller, product = custom
+        seller, product, category = custom
+        base_dir    = RECEIPTS_DIR / category if category else RECEIPTS_DIR
         folder_name = f"{date_str} - {sanitize(seller)} - {sanitize(product)} - {label}"
-        folder      = RECEIPTS_DIR / folder_name
+        folder      = base_dir / folder_name
         folder.mkdir(parents=True, exist_ok=True)
         log.info(f"[CUSTOM]   {folder_name}")
         save_attachments(service, msg_id, msg["payload"], folder)
