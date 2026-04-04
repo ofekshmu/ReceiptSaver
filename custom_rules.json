@@ -8,6 +8,15 @@
     "category": "חשבנות/ארנונה"
   },
   {
+    "_comment": "עיריית חיפה — ארנונה שלום שבאזי 7",
+    "match_sender_contains": "onecity.co.il",
+    "match_subject_contains": null,
+    "seller": "עיריית חיפה",
+    "product": "קבלת תשלום",
+    "base_dir": "C:\\Users\\ofeks\\OneDrive\\Documents\\נכסים\\שלום שבאזי 7",
+    "category": "חשבנות/ארנונה"
+  },
+  {
     "_comment": "iCount invoicing platform — יפנולוגי",
     "match_sender_contains": "icount.co.il",
     "match_subject_contains": "יפנולוגי",

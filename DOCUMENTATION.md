@@ -174,13 +174,14 @@ These are permanent rules that never need updating:
 
 These were added through manual review sessions with Claude:
 
-| Sender Domain | Subject Contains | Seller | Product | Category |
-|---------------|-----------------|--------|---------|----------|
-| `ladpc.co.il` | — | עיריית ראשון לציון | אישור תשלום | חשבנות/ארנונה |
-| `icount.co.il` | יפנולוגי | יפנולוגי | חשבונית מס קבלה | יפנולוגי |
-| `electra-power.co.il` | — | אלקטרה פאוור | חשבונית חשמל | חשבנות/חשמל |
-| `printernet.co.il` | פזגז | פזגז | חשבונית גז | חשבנות/גז |
-| `elalinfo.co.il` | — | אל על | כרטיס טיסה | — |
+| Sender Domain | Subject Contains | Seller | Product | Category | Base Dir |
+|---------------|-----------------|--------|---------|----------|----------|
+| `ladpc.co.il` | — | עיריית ראשון לציון | אישור תשלום | חשבנות/ארנונה | — |
+| `onecity.co.il` | — | עיריית חיפה | קבלת תשלום | חשבנות/ארנונה | נכסים\שלום שבאזי 7 |
+| `icount.co.il` | יפנולוגי | יפנולוגי | חשבונית מס קבלה | יפנולוגי | — |
+| `electra-power.co.il` | — | אלקטרה פאוור | חשבונית חשמל | חשבנות/חשמל | — |
+| `printernet.co.il` | פזגז | פזגז | חשבונית גז | חשבנות/גז | — |
+| `elalinfo.co.il` | — | אל על | כרטיס טיסה | — | — |
 
 ---
 
@@ -221,8 +222,9 @@ The script searches each account using this Gmail query:
 
 ```
 -in:sent has:attachment newer_than:60d
-(subject:receipt OR subject:invoice OR subject:קבלה OR subject:חשבונית
-OR subject:אישור OR subject:הזמנה OR subject:purchase OR subject:payment)
+(subject:receipt OR subject:invoice OR subject:קבלה OR subject:קבלת
+OR subject:חשבונית OR subject:אישור OR subject:הזמנה
+OR subject:תשלום OR subject:purchase OR subject:payment)
 ```
 
 **Key behaviors:**
@@ -302,7 +304,8 @@ Since Claude has Gmail MCP access to your `ofek` account, you can ask things lik
 - `match_subject_contains` — optional, substring match on the subject line (use when same platform sends for multiple sellers, e.g. iCount)
 - `seller` — the name that appears in the folder
 - `product` — the product/service description in the folder name
-- `category` — optional, subdirectory path under `קבלות\` (e.g. `חשבנות/חשמל`). Omit or set to `null` for uncategorized receipts.
+- `category` — optional, subdirectory path under the base directory (e.g. `חשבנות/ארנונה`). Omit or set to `null` for no subcategory.
+- `base_dir` — optional, absolute path to a different root directory. If omitted, defaults to `קבלות\`. Use for receipts belonging to a specific property or project.
 
 ### Categories
 

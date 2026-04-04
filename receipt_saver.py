@@ -84,8 +84,9 @@ SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
 GMAIL_QUERY = (
     '-in:sent has:attachment newer_than:60d '
-    '(subject:receipt OR subject:invoice OR subject:קבלה OR subject:חשבונית '
-    'OR subject:אישור OR subject:הזמנה OR subject:purchase OR subject:payment)'
+    '(subject:receipt OR subject:invoice OR subject:קבלה OR subject:קבלת '
+    'OR subject:חשבונית OR subject:אישור OR subject:הזמנה '
+    'OR subject:תשלום OR subject:purchase OR subject:payment)'
 )
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -311,7 +312,8 @@ def match_custom(sender: str, subject: str):
         sender_ok  = sender_frag.lower()  in sender.lower()  if sender_frag  else True
         subject_ok = subject_frag.lower() in subject.lower() if subject_frag else True
         if sender_ok and subject_ok:
-            return rule["seller"], rule["product"], rule.get("category")
+            base_dir = Path(rule["base_dir"]) if rule.get("base_dir") else None
+            return rule["seller"], rule["product"], rule.get("category"), base_dir
     return None
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -452,10 +454,11 @@ def process_message(service, msg_id: str, account: dict) -> dict:
         m = re.search(r"מאת\s+(.+?)$", subject)
         seller  = sanitize(m.group(1).strip()) if m else "iCount"
         product = "חשבונית מס קבלה"
-        # Check custom rules for a category override
+        # Check custom rules for a category/base_dir override
         custom_match = match_custom(sender, subject)
         category = custom_match[2] if custom_match else None
-        base_dir    = RECEIPTS_DIR / category if category else RECEIPTS_DIR
+        root     = custom_match[3] if custom_match and custom_match[3] else RECEIPTS_DIR
+        base_dir = root / category if category else root
         folder_name = f"{date_str} - {seller} - {product} - {label}"
         folder      = base_dir / folder_name
         folder.mkdir(parents=True, exist_ok=True)
@@ -481,8 +484,9 @@ def process_message(service, msg_id: str, account: dict) -> dict:
     # ── Step 2: custom rules ───────────────────────────────────────────────
     custom = match_custom(sender, subject)
     if custom:
-        seller, product, category = custom
-        base_dir    = RECEIPTS_DIR / category if category else RECEIPTS_DIR
+        seller, product, category, rule_base_dir = custom
+        root     = rule_base_dir if rule_base_dir else RECEIPTS_DIR
+        base_dir = root / category if category else root
         folder_name = f"{date_str} - {sanitize(seller)} - {sanitize(product)} - {label}"
         folder      = base_dir / folder_name
         folder.mkdir(parents=True, exist_ok=True)
