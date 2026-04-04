@@ -54,5 +54,12 @@
     "match_subject_contains": null,
     "seller": "אל על",
     "product": "כרטיס טיסה"
+  },
+  {
+    "_comment": "חבר (HEVER) — אישורי הזמנה",
+    "match_sender_contains": "icmega.org",
+    "match_subject_contains": null,
+    "seller": "חבר",
+    "product": "הזמנה"
   }
 ]
