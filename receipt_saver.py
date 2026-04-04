@@ -92,10 +92,16 @@ GMAIL_QUERY = (
 # ══════════════════════════════════════════════════════════════════════════
 # LOGGING
 # ══════════════════════════════════════════════════════════════════════════
-logging.basicConfig(
-    filename=LOG_FILE, level=logging.INFO,
-    format="%(asctime)s  %(levelname)s  %(message)s", encoding="utf-8",
-)
+class _ActionFormatter(logging.Formatter):
+    """Show level name only for WARNING and above; omit it for INFO."""
+    def format(self, record):
+        if record.levelno >= logging.WARNING:
+            record.msg = f"{record.levelname}  {record.msg}"
+        return super().format(record)
+
+_handler = logging.FileHandler(LOG_FILE, encoding="utf-8")
+_handler.setFormatter(_ActionFormatter("%(asctime)s  %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
+logging.basicConfig(level=logging.INFO, handlers=[_handler])
 log = logging.getLogger(__name__)
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -185,6 +191,16 @@ KNOWN_RULES = [
     (lambda s, sub: sender_contains(s, "stripe.com"),       _stripe_seller,       lambda sub, att: "מנוי",             None),
 ]
 
+def _log_saved(action: str, folder_name: str, sender: str, folder: Path, files: list):
+    lines = [
+        f"{action:<10} {folder_name}",
+        f"           FROM  {sender}",
+        f"           TO    {folder}",
+    ]
+    for f in files:
+        lines.append(f"           FILE  {f}")
+    log.info("\n".join(lines))
+
 def match_hardcoded(sender: str, subject: str):
     for match_fn, seller_val, product_fn, category in KNOWN_RULES:
         if match_fn(sender, subject):
@@ -267,10 +283,10 @@ def get_body_html(payload: dict) -> str:
 
 def save_email_pdf(payload: dict, folder: Path,
                    subject: str, sender: str, date_str: str):
-    """Render the email HTML to email.pdf inside the folder."""
+    """Render the email HTML to email.pdf inside the folder. Returns saved path or None."""
     if not _WEASYPRINT_OK:
-        log.warning("weasyprint not installed — skipping email PDF")
-        return
+        log.warning("weasyprint not available — skipping email.pdf")
+        return None
     try:
         body_html = get_body_html(payload)
         full_html = f"""<!DOCTYPE html>
@@ -289,9 +305,10 @@ def save_email_pdf(payload: dict, folder: Path,
 </body></html>"""
         dest = folder / "email.pdf"
         _WeasyprintHTML(string=full_html).write_pdf(str(dest))
-        log.info(f"    ✓ {dest}")
+        return dest
     except Exception as e:
-        log.warning(f"    ⚠ email PDF failed: {e}")
+        log.warning(f"email.pdf failed: {e}")
+        return None
 
 # ══════════════════════════════════════════════════════════════════════════
 # CUSTOM RULES  (managed via chat with Claude)
@@ -387,8 +404,7 @@ def save_attachments(service, msg_id: str, payload: dict, folder: Path) -> list:
                 data = base64.urlsafe_b64decode(att["data"])
                 dest = folder / sanitize(filename)
                 dest.write_bytes(data)
-                log.info(f"    ✓ {dest}")
-                saved.append(filename)
+                saved.append(dest)
             if part.get("parts"):
                 walk(part["parts"])
     walk(payload.get("parts", [payload]))
@@ -462,11 +478,9 @@ def process_message(service, msg_id: str, account: dict) -> dict:
         folder_name = f"{date_str} - {seller} - {product} - {label}"
         folder      = base_dir / folder_name
         folder.mkdir(parents=True, exist_ok=True)
-        log.info(f"[ICOUNT]   {folder_name}")
-        log.info(f"  Date: {date_str}  Account: {label}")
-        log.info(f"  Path: {folder}")
-        save_email_pdf(msg["payload"], folder, subject, sender, date_str)
+        pdf = save_email_pdf(msg["payload"], folder, subject, sender, date_str)
         create_icount_ticktick_task(folder_name, folder, label, msg_id, subject)
+        _log_saved("ICOUNT", folder_name, sender, folder, [pdf] if pdf else [])
         return {"status": "saved", "folder_name": folder_name}
 
     # ── Step 1: hardcoded rules ────────────────────────────────────────────
@@ -478,11 +492,11 @@ def process_message(service, msg_id: str, account: dict) -> dict:
         folder_name = f"{date_str} - {seller} - {product} - {label}"
         folder      = base_dir / folder_name
         folder.mkdir(parents=True, exist_ok=True)
-        log.info(f"[KNOWN]    {folder_name}")
-        log.info(f"  Date: {date_str}  Account: {label}")
-        log.info(f"  Path: {folder}")
-        save_attachments(service, msg_id, msg["payload"], folder)
-        save_email_pdf(msg["payload"], folder, subject, sender, date_str)
+        files = save_attachments(service, msg_id, msg["payload"], folder)
+        pdf = save_email_pdf(msg["payload"], folder, subject, sender, date_str)
+        if pdf:
+            files.append(pdf)
+        _log_saved("DOWNLOADED", folder_name, sender, folder, files)
         return {"status": "saved", "folder_name": folder_name}
 
     # ── Step 2: custom rules ───────────────────────────────────────────────
@@ -494,11 +508,11 @@ def process_message(service, msg_id: str, account: dict) -> dict:
         folder_name = f"{date_str} - {sanitize(seller)} - {sanitize(product)} - {label}"
         folder      = base_dir / folder_name
         folder.mkdir(parents=True, exist_ok=True)
-        log.info(f"[CUSTOM]   {folder_name}")
-        log.info(f"  Date: {date_str}  Account: {label}")
-        log.info(f"  Path: {folder}")
-        save_attachments(service, msg_id, msg["payload"], folder)
-        save_email_pdf(msg["payload"], folder, subject, sender, date_str)
+        files = save_attachments(service, msg_id, msg["payload"], folder)
+        pdf = save_email_pdf(msg["payload"], folder, subject, sender, date_str)
+        if pdf:
+            files.append(pdf)
+        _log_saved("DOWNLOADED", folder_name, sender, folder, files)
         return {"status": "saved", "folder_name": folder_name}
 
     # ── Step 3: fallback ───────────────────────────────────────────────────
@@ -507,11 +521,11 @@ def process_message(service, msg_id: str, account: dict) -> dict:
     folder_name   = f"{date_str} - {sender_name} - {subject_clean} - {label}"
     folder        = MANUAL_DIR / folder_name
     folder.mkdir(parents=True, exist_ok=True)
-    log.info(f"[FALLBACK] {folder_name}")
-    log.info(f"  Date: {date_str}  Account: {label}")
-    log.info(f"  Path: {folder}")
-    save_attachments(service, msg_id, msg["payload"], folder)
-    save_email_pdf(msg["payload"], folder, subject, sender, date_str)
+    files = save_attachments(service, msg_id, msg["payload"], folder)
+    pdf = save_email_pdf(msg["payload"], folder, subject, sender, date_str)
+    if pdf:
+        files.append(pdf)
+    _log_saved("FALLBACK", folder_name, sender, folder, files)
     create_ticktick_task(folder_name, folder, label)
     append_fallback_log({
         "message_id":    msg_id,
