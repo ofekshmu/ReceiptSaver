@@ -272,6 +272,21 @@ def create_icount_ticktick_task(folder_name: str, folder_path: Path,
 # EMAIL → PDF
 # ══════════════════════════════════════════════════════════════════════════
 
+def get_body_text(payload: dict) -> str:
+    """Extract plain text from email payload (no HTML)."""
+    result = []
+
+    def walk(part):
+        mime = part.get("mimeType", "")
+        data = part.get("body", {}).get("data", "")
+        if data and mime == "text/plain":
+            result.append(base64.urlsafe_b64decode(data).decode("utf-8", errors="replace"))
+        for sub in part.get("parts", []):
+            walk(sub)
+
+    walk(payload)
+    return "\n".join(result)
+
 def get_body_html(payload: dict) -> str:
     """Extract HTML body, falling back to plain text wrapped in <pre>."""
     html_part  = None
@@ -338,17 +353,25 @@ def load_custom_rules() -> list:
             log.warning(f"Could not load custom_rules.json: {e}")
     return []
 
-def match_custom(sender: str, subject: str):
+def match_custom(sender: str, subject: str, body: str = ""):
     for rule in load_custom_rules():
         sender_frag   = rule.get("match_sender_contains", "")
         subject_frag  = rule.get("match_subject_contains") or ""
         exclude_frag  = rule.get("exclude_subject_contains") or ""
+        body_frag     = rule.get("match_body_contains") or ""
         sender_ok   = sender_frag.lower()  in sender.lower()  if sender_frag  else True
         subject_ok  = subject_frag.lower() in subject.lower() if subject_frag else True
         excluded    = exclude_frag.lower() in subject.lower() if exclude_frag else False
-        if sender_ok and subject_ok and not excluded:
+        body_ok     = body_frag in body                        if body_frag   else True
+        if sender_ok and subject_ok and not excluded and body_ok:
             base_dir = Path(rule["base_dir"]) if rule.get("base_dir") else None
-            return rule["seller"], rule["product"], rule.get("category"), base_dir
+            product  = rule["product"]
+            body_regex = rule.get("product_body_regex") or ""
+            if body_regex and body:
+                m = re.search(body_regex, body)
+                if m:
+                    product = sanitize(m.group(1).strip())
+            return rule["seller"], product, rule.get("category"), base_dir
     return None
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -521,7 +544,8 @@ def process_message(service, msg_id: str, account: dict) -> dict:
         return {"status": "saved", "folder_name": folder_name}
 
     # ── Step 2: custom rules ───────────────────────────────────────────────
-    custom = match_custom(sender, subject)
+    body   = get_body_text(msg["payload"])
+    custom = match_custom(sender, subject, body)
     if custom:
         seller, product, category, rule_base_dir = custom
         root     = rule_base_dir if rule_base_dir else RECEIPTS_DIR

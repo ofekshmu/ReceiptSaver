@@ -317,6 +317,8 @@ Since Claude has Gmail MCP access to your `ofek` account, you can ask things lik
 - `match_sender_contains` — required, substring match on the sender email address
 - `match_subject_contains` — optional, substring match on the subject line (use when same platform sends for multiple sellers, e.g. iCount)
 - `exclude_subject_contains` — optional, skip the email if the subject contains this string (e.g. `פרסומת` to skip promotional emails)
+- `match_body_contains` — optional, skip the email if the plain-text body does NOT contain this string (e.g. `מספר הזמנה` to require an actual order number)
+- `product_body_regex` — optional, regex with one capture group to extract the product name from the email body (overrides the static `product` field when matched)
 - `seller` — the name that appears in the folder
 - `product` — the product/service description in the folder name
 - `category` — optional, subdirectory path under the base directory (e.g. `חשבנות/ארנונה`). Omit or set to `null` for no subcategory.

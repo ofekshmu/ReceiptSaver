@@ -56,10 +56,12 @@
     "product": "כרטיס טיסה"
   },
   {
-    "_comment": "חבר (HEVER) — אישורי הזמנה בלבד, ללא פרסומות",
+    "_comment": "חבר (HEVER) — אישורי הזמנה בלבד (body must contain מספר הזמנה)",
     "match_sender_contains": "icmega.org",
     "match_subject_contains": null,
     "exclude_subject_contains": "פרסומת",
+    "match_body_contains": "מספר הזמנה",
+    "product_body_regex": "שם הפריט[^\\n]+\\n([^\\n]+)",
     "seller": "חבר",
     "product": "הזמנה"
   }
