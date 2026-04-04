@@ -8,11 +8,29 @@
     "category": "חשבנות/ארנונה"
   },
   {
+    "_comment": "עיריית חיפה — ארנונה שלום שבאזי 7 (citypay platform, Haifa sender)",
+    "match_sender_contains": "חיפה",
+    "match_subject_contains": null,
+    "seller": "עיריית חיפה",
+    "product": "קבלת תשלום",
+    "base_dir": "C:\\Users\\ofeks\\OneDrive\\Documents\\נכסים\\שלום שבאזי 7",
+    "category": "חשבנות/ארנונה"
+  },
+  {
+    "_comment": "ראשון לציון החברה לב — ארנונה (citypay platform)",
+    "match_sender_contains": "ראשון לציון",
+    "match_subject_contains": null,
+    "seller": "ראשון לציון החברה לב",
+    "product": "קבלת תשלום",
+    "category": "חשבנות/ארנונה"
+  },
+  {
     "_comment": "iCount invoicing platform — יפנולוגי",
     "match_sender_contains": "icount.co.il",
     "match_subject_contains": "יפנולוגי",
     "seller": "יפנולוגי",
-    "product": "חשבונית מס קבלה"
+    "product": "חשבונית מס קבלה",
+    "category": "יפנולוגי"
   },
   {
     "_comment": "אלקטרה פאוור — חשבונית חשמל",
@@ -27,7 +45,8 @@
     "match_sender_contains": "printernet.co.il",
     "match_subject_contains": "פזגז",
     "seller": "פזגז",
-    "product": "חשבונית גז"
+    "product": "חשבונית גז",
+    "category": "חשבנות/גז"
   },
   {
     "_comment": "אל על — כרטיסי טיסה",
@@ -35,5 +54,15 @@
     "match_subject_contains": null,
     "seller": "אל על",
     "product": "כרטיס טיסה"
+  },
+  {
+    "_comment": "חבר (HEVER) — אישורי הזמנה בלבד (body must contain מספר הזמנה)",
+    "match_sender_contains": "icmega.org",
+    "match_subject_contains": null,
+    "exclude_subject_contains": "פרסומת",
+    "match_body_contains": "מספר הזמנה",
+    "product_body_regex": "שם הפריט[^\\n]+\\n([^\\n]+)",
+    "seller": "חבר",
+    "product": "הזמנה"
   }
 ]

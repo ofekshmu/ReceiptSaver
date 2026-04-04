@@ -14,28 +14,31 @@ C:\Users\ofeks\OneDrive\Documents\קבלות\
 │
 ├── חשבנות\                              ← utility bills category
 │   ├── חשמל\                            ← electricity (אלקטרה פאוור)
-│   │   └── YYYY-MM-DD - Seller - Product - [account]\
+│   │   └── YYYY_MM_DD - Seller - Product - [account]\
 │   ├── מיים\                            ← water
-│   │   └── YYYY-MM-DD - Seller - Product - [account]\
+│   │   └── YYYY_MM_DD - Seller - Product - [account]\
 │   ├── ארנונה\                          ← municipal tax (עיריית ראשון לציון)
-│   │   └── YYYY-MM-DD - Seller - Product - [account]\
-│   └── אינטרנט\                         ← internet (סלקום)
-│       └── YYYY-MM-DD - Seller - Product - [account]\
+│   │   └── YYYY_MM_DD - Seller - Product - [account]\
+│   ├── אינטרנט\                         ← internet (סלקום)
+│   │   └── YYYY_MM_DD - Seller - Product - [account]\
+│   └── גז\                              ← gas (פזגז)
+│       └── YYYY_MM_DD - Seller - Product - [account]\
+
 │
-├── YYYY-MM-DD - Seller - Product - [account]\   ← uncategorized receipts
+├── YYYY_MM_DD - Seller - Product - [account]\   ← uncategorized receipts
 │   ├── attachment.pdf
 │   ├── attachment2.pdf
 │   └── email.pdf                        ← always present, printout of the email
 │
 └── _לטיפול ידני\                        ← fallback folder
-    └── YYYY-MM-DD - Sender - Subject - [account]\
+    └── YYYY_MM_DD - Sender - Subject - [account]\
         ├── attachment.pdf
         └── email.pdf
 ```
 
 ### Folder Naming Format
 ```
-YYYY-MM-DD - Seller Name - Product Description - [account]
+YYYY_MM_DD - Seller Name - Product Description - [account]
 ```
 
 **Account labels:**
@@ -45,10 +48,10 @@ YYYY-MM-DD - Seller Name - Product Description - [account]
 
 **Examples:**
 ```
-2026-03-25 - סלקום - חשבונית חודשית - ofek
-2026-03-20 - Wolt - Shi-Shi - family
-2026-03-13 - יפנולוגי - חשבונית מס קבלה - ofek
-2026-04-02 - אלקטרה פאוור - חשבונית חשמל - family
+2026_03_25 - סלקום - חשבונית חודשית - ofek
+2026_03_20 - Wolt - Shi-Shi - family
+2026_03_13 - יפנולוגי - חשבונית מס קבלה - ofek
+2026_04_02 - אלקטרה פאוור - חשבונית חשמל - family
 ```
 
 ---
@@ -63,7 +66,7 @@ YYYY-MM-DD - Seller Name - Product Description - [account]
 | `custom_rules.json` | User-defined sender rules — grows over time |
 | `fallback_log.json` | Log of all unrecognized emails |
 | `processed_ids.json` | Tracks every email already seen — prevents duplicates |
-| `receipt_saver.log` | Full activity log with timestamps |
+| `receipt_saver.log` | Full activity log with timestamps, full paths, and saved filenames |
 | `credentials_ofek.json` | Google OAuth credentials for ofek account |
 | `credentials_family.json` | Google OAuth credentials for family account |
 | `credentials_yuval.json` | Google OAuth credentials for yuval account |
@@ -72,7 +75,8 @@ YYYY-MM-DD - Seller Name - Product Description - [account]
 | `token_yuval.json` | Auto-refreshing Gmail access token for yuval |
 | `ticktick_token.json` | TickTick API access token |
 | `ticktick_auth.py` | One-time TickTick authorization script |
-| `setup.bat` | One-time installer — registers Task Scheduler job |
+| `run.bat` | Runs the script — shortcut placed in Windows startup folder |
+| `setup.bat` | One-time installer — registers Task Scheduler job (replaced by run.bat) |
 
 ---
 
@@ -171,13 +175,16 @@ These are permanent rules that never need updating:
 
 These were added through manual review sessions with Claude:
 
-| Sender Domain | Subject Contains | Seller | Product | Category |
-|---------------|-----------------|--------|---------|----------|
-| `ladpc.co.il` | — | עיריית ראשון לציון | אישור תשלום | חשבנות/ארנונה |
-| `icount.co.il` | יפנולוגי | יפנולוגי | חשבונית מס קבלה | — |
-| `electra-power.co.il` | — | אלקטרה פאוור | חשבונית חשמל | חשבנות/חשמל |
-| `printernet.co.il` | פזגז | פזגז | חשבונית גז | — |
-| `elalinfo.co.il` | — | אל על | כרטיס טיסה | — |
+| Sender Domain | Subject Contains | Seller | Product | Category | Base Dir |
+|---------------|-----------------|--------|---------|----------|----------|
+| `ladpc.co.il` | — | עיריית ראשון לציון | אישור תשלום | חשבנות/ארנונה | — |
+| `onecity.co.il` (sender contains חיפה) | — | עיריית חיפה | קבלת תשלום | חשבנות/ארנונה | נכסים\שלום שבאזי 7 |
+| `onecity.co.il` (sender contains ראשון לציון) | — | ראשון לציון החברה לב | קבלת תשלום | חשבנות/ארנונה | — |
+| `icount.co.il` | יפנולוגי | יפנולוגי | חשבונית מס קבלה | יפנולוגי | — |
+| `electra-power.co.il` | — | אלקטרה פאוור | חשבונית חשמל | חשבנות/חשמל | — |
+| `printernet.co.il` | פזגז | פזגז | חשבונית גז | חשבנות/גז | — |
+| `elalinfo.co.il` | — | אל על | כרטיס טיסה | — | — |
+| `icmega.org` | — | חבר | הזמנה | — | — |
 
 ---
 
@@ -214,16 +221,28 @@ The script shows three types of Windows toast notifications:
 
 ## Gmail Search Query
 
-The script searches each account using this Gmail query:
+The script builds the Gmail query dynamically at runtime:
 
 ```
--in:sent has:attachment newer_than:60d
-(subject:receipt OR subject:invoice OR subject:קבלה OR subject:חשבונית
-OR subject:אישור OR subject:הזמנה OR subject:purchase OR subject:payment)
+-in:sent newer_than:60d (
+  (has:attachment AND (subject:receipt OR subject:invoice OR subject:קבלה OR subject:קבלת
+   OR subject:חשבונית OR subject:אישור OR subject:הזמנה
+   OR subject:תשלום OR subject:purchase OR subject:payment))
+  OR from:ladpc.co.il
+  OR from:icount.co.il
+  OR from:electra-power.co.il
+  OR from:printernet.co.il
+  OR from:elalinfo.co.il
+  OR from:icmega.org
+  ...
+)
 ```
+
+The `from:` exceptions are generated automatically from every domain-based `match_sender_contains` entry in `custom_rules.json`. Adding a new custom rule with a domain automatically updates the query — no manual changes needed.
 
 **Key behaviors:**
-- Only emails with attachments are considered
+- Emails with attachments matching subject keywords are always included
+- Known senders (from custom_rules.json) are always included even without attachments — their email body is saved as `email.pdf`
 - SENT folder is always excluded
 - Looks back 60 days on every run
 - Already-processed email IDs are stored in `processed_ids.json` — each email is processed only once regardless of how many times the script runs
@@ -297,9 +316,13 @@ Since Claude has Gmail MCP access to your `ofek` account, you can ask things lik
 
 - `match_sender_contains` — required, substring match on the sender email address
 - `match_subject_contains` — optional, substring match on the subject line (use when same platform sends for multiple sellers, e.g. iCount)
+- `exclude_subject_contains` — optional, skip the email if the subject contains this string (e.g. `פרסומת` to skip promotional emails)
+- `match_body_contains` — optional, skip the email if the plain-text body does NOT contain this string (e.g. `מספר הזמנה` to require an actual order number)
+- `product_body_regex` — optional, regex with one capture group to extract the product name from the email body (overrides the static `product` field when matched)
 - `seller` — the name that appears in the folder
 - `product` — the product/service description in the folder name
-- `category` — optional, subdirectory path under `קבלות\` (e.g. `חשבנות/חשמל`). Omit or set to `null` for uncategorized receipts.
+- `category` — optional, subdirectory path under the base directory (e.g. `חשבנות/ארנונה`). Omit or set to `null` for no subcategory.
+- `base_dir` — optional, absolute path to a different root directory. If omitted, defaults to `קבלות\`. Use for receipts belonging to a specific property or project.
 
 ### Categories
 
@@ -311,6 +334,7 @@ Receipts can be routed into subcategories under `קבלות\חשבנות\`:
 | `חשבנות/מיים` | מיים | Water bills |
 | `חשבנות/ארנונה` | ארנונה | Municipal tax |
 | `חשבנות/אינטרנט` | אינטרנט | Internet bills |
+| `חשבנות/גז` | גז | Gas bills |
 
 Both hardcoded rules (4th tuple element) and custom rules (`category` field) support categories.
 
@@ -324,10 +348,10 @@ Both hardcoded rules (4th tuple element) and custom rules (`category` field) sup
     "message_id": "19cd976b02585b03",
     "account": "ofek",
     "account_email": "ofek.shmuel1@gmail.com",
-    "date": "2026-03-10",
+    "date": "2026_03_10",
     "sender": "noreply@somesite.co.il",
     "subject": "אישור תשלום",
-    "folder_name": "2026-03-10 - noreply - אישור תשלום - ofek",
+    "folder_name": "2026_03_10 - noreply - אישור תשלום - ofek",
     "folder_path": "C:\\Users\\ofeks\\OneDrive\\Documents\\קבלות\\_לטיפול ידני\\...",
     "resolved": false
   }
@@ -358,7 +382,7 @@ Install all: `pip install google-auth google-auth-oauthlib google-auth-httplib2 
 
 | Problem | Solution |
 |---------|----------|
-| Script not running at startup | Check Task Scheduler → `ReceiptSaver` task exists and is enabled |
+| Script not running at startup | Check startup folder (`shell:startup`) — `run.bat` shortcut should be there |
 | Gmail auth error | Delete `token_[account].json` and run `receipt_saver.py` manually to re-authorize |
 | TickTick tasks not created | Check `ticktick_token.json` exists; re-run `ticktick_auth.py` if needed |
 | No notifications | Run `pip install plyer` |
