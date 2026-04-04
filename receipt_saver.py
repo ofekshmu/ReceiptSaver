@@ -90,7 +90,7 @@ GMAIL_SUBJECT_KEYWORDS = (
 
 def build_gmail_query() -> str:
     """Build Gmail search query, adding from: exceptions for domain-based custom rules."""
-    base = f'-in:sent newer_than:60d ((has:attachment AND ({GMAIL_SUBJECT_KEYWORDS}))'
+    base = f'-in:sent -subject:פרסומת newer_than:60d ((has:attachment AND ({GMAIL_SUBJECT_KEYWORDS}))'
     try:
         rules = json.loads(CUSTOM_RULES_FILE.read_text(encoding="utf-8"))
         for rule in rules:
@@ -476,6 +476,9 @@ def process_message(service, msg_id: str, account: dict) -> dict:
 
     headers   = {h["name"]: h["value"] for h in msg["payload"].get("headers", [])}
     subject   = headers.get("Subject", "(no subject)")
+
+    if "פרסומת" in subject:
+        return {"status": "skipped"}
     sender    = headers.get("From", "")
     date_str  = parse_date(headers.get("Date", ""))
     first_att = first_attachment_name(msg["payload"])
