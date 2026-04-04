@@ -43,7 +43,7 @@ except ImportError:
 try:
     from weasyprint import HTML as _WeasyprintHTML
     _WEASYPRINT_OK = True
-except ImportError:
+except Exception:
     _WEASYPRINT_OK = False
 
 # ══════════════════════════════════════════════════════════════════════════
