@@ -9,6 +9,9 @@ processed_ids.json
 fallback_log.json
 receipt_saver.log
 
+# Claude Code internals
+.claude/
+
 # Python
 __pycache__/
 *.pyc
