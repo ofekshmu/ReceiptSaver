@@ -56,9 +56,10 @@
     "product": "כרטיס טיסה"
   },
   {
-    "_comment": "חבר (HEVER) — אישורי הזמנה",
+    "_comment": "חבר (HEVER) — אישורי הזמנה בלבד, ללא פרסומות",
     "match_sender_contains": "icmega.org",
     "match_subject_contains": null,
+    "exclude_subject_contains": "פרסומת",
     "seller": "חבר",
     "product": "הזמנה"
   }

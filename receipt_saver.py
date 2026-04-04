@@ -94,9 +94,13 @@ def build_gmail_query() -> str:
     try:
         rules = json.loads(CUSTOM_RULES_FILE.read_text(encoding="utf-8"))
         for rule in rules:
-            sender = rule.get("match_sender_contains", "") or ""
+            sender  = rule.get("match_sender_contains", "") or ""
+            exclude = rule.get("exclude_subject_contains", "") or ""
             if "." in sender:  # domain-based match (e.g. icmega.org)
-                base += f" OR from:{sender}"
+                clause = f"from:{sender}"
+                if exclude:
+                    clause = f"({clause} -subject:{exclude})"
+                base += f" OR {clause}"
     except Exception:
         pass
     return base + ")"
@@ -336,11 +340,13 @@ def load_custom_rules() -> list:
 
 def match_custom(sender: str, subject: str):
     for rule in load_custom_rules():
-        sender_frag  = rule.get("match_sender_contains", "")
-        subject_frag = rule.get("match_subject_contains") or ""
-        sender_ok  = sender_frag.lower()  in sender.lower()  if sender_frag  else True
-        subject_ok = subject_frag.lower() in subject.lower() if subject_frag else True
-        if sender_ok and subject_ok:
+        sender_frag   = rule.get("match_sender_contains", "")
+        subject_frag  = rule.get("match_subject_contains") or ""
+        exclude_frag  = rule.get("exclude_subject_contains") or ""
+        sender_ok   = sender_frag.lower()  in sender.lower()  if sender_frag  else True
+        subject_ok  = subject_frag.lower() in subject.lower() if subject_frag else True
+        excluded    = exclude_frag.lower() in subject.lower() if exclude_frag else False
+        if sender_ok and subject_ok and not excluded:
             base_dir = Path(rule["base_dir"]) if rule.get("base_dir") else None
             return rule["seller"], rule["product"], rule.get("category"), base_dir
     return None
