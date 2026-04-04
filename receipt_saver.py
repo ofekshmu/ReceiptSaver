@@ -82,12 +82,24 @@ ACCOUNTS = [
 
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
-GMAIL_QUERY = (
-    '-in:sent has:attachment newer_than:60d '
-    '(subject:receipt OR subject:invoice OR subject:קבלה OR subject:קבלת '
+GMAIL_SUBJECT_KEYWORDS = (
+    'subject:receipt OR subject:invoice OR subject:קבלה OR subject:קבלת '
     'OR subject:חשבונית OR subject:אישור OR subject:הזמנה '
-    'OR subject:תשלום OR subject:purchase OR subject:payment)'
+    'OR subject:תשלום OR subject:purchase OR subject:payment'
 )
+
+def build_gmail_query() -> str:
+    """Build Gmail search query, adding from: exceptions for domain-based custom rules."""
+    base = f'-in:sent newer_than:60d ((has:attachment AND ({GMAIL_SUBJECT_KEYWORDS}))'
+    try:
+        rules = json.loads(CUSTOM_RULES_FILE.read_text(encoding="utf-8"))
+        for rule in rules:
+            sender = rule.get("match_sender_contains", "") or ""
+            if "." in sender:  # domain-based match (e.g. icmega.org)
+                base += f" OR from:{sender}"
+    except Exception:
+        pass
+    return base + ")"
 
 # ══════════════════════════════════════════════════════════════════════════
 # LOGGING
@@ -575,7 +587,7 @@ def main():
             continue
 
         results  = service.users().messages().list(
-            userId="me", q=GMAIL_QUERY, maxResults=300
+            userId="me", q=build_gmail_query(), maxResults=300
         ).execute()
         messages = results.get("messages", [])
         log.info(f"  Candidates: {len(messages)}")

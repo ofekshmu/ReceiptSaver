@@ -75,7 +75,8 @@ YYYY_MM_DD - Seller Name - Product Description - [account]
 | `token_yuval.json` | Auto-refreshing Gmail access token for yuval |
 | `ticktick_token.json` | TickTick API access token |
 | `ticktick_auth.py` | One-time TickTick authorization script |
-| `setup.bat` | One-time installer — registers Task Scheduler job |
+| `run.bat` | Runs the script — shortcut placed in Windows startup folder |
+| `setup.bat` | One-time installer — registers Task Scheduler job (replaced by run.bat) |
 
 ---
 
@@ -183,6 +184,7 @@ These were added through manual review sessions with Claude:
 | `electra-power.co.il` | — | אלקטרה פאוור | חשבונית חשמל | חשבנות/חשמל | — |
 | `printernet.co.il` | פזגז | פזגז | חשבונית גז | חשבנות/גז | — |
 | `elalinfo.co.il` | — | אל על | כרטיס טיסה | — | — |
+| `icmega.org` | — | חבר | הזמנה | — | — |
 
 ---
 
@@ -219,17 +221,28 @@ The script shows three types of Windows toast notifications:
 
 ## Gmail Search Query
 
-The script searches each account using this Gmail query:
+The script builds the Gmail query dynamically at runtime:
 
 ```
--in:sent has:attachment newer_than:60d
-(subject:receipt OR subject:invoice OR subject:קבלה OR subject:קבלת
-OR subject:חשבונית OR subject:אישור OR subject:הזמנה
-OR subject:תשלום OR subject:purchase OR subject:payment)
+-in:sent newer_than:60d (
+  (has:attachment AND (subject:receipt OR subject:invoice OR subject:קבלה OR subject:קבלת
+   OR subject:חשבונית OR subject:אישור OR subject:הזמנה
+   OR subject:תשלום OR subject:purchase OR subject:payment))
+  OR from:ladpc.co.il
+  OR from:icount.co.il
+  OR from:electra-power.co.il
+  OR from:printernet.co.il
+  OR from:elalinfo.co.il
+  OR from:icmega.org
+  ...
+)
 ```
+
+The `from:` exceptions are generated automatically from every domain-based `match_sender_contains` entry in `custom_rules.json`. Adding a new custom rule with a domain automatically updates the query — no manual changes needed.
 
 **Key behaviors:**
-- Only emails with attachments are considered
+- Emails with attachments matching subject keywords are always included
+- Known senders (from custom_rules.json) are always included even without attachments — their email body is saved as `email.pdf`
 - SENT folder is always excluded
 - Looks back 60 days on every run
 - Already-processed email IDs are stored in `processed_ids.json` — each email is processed only once regardless of how many times the script runs
@@ -366,7 +379,7 @@ Install all: `pip install google-auth google-auth-oauthlib google-auth-httplib2 
 
 | Problem | Solution |
 |---------|----------|
-| Script not running at startup | Check Task Scheduler → `ReceiptSaver` task exists and is enabled |
+| Script not running at startup | Check startup folder (`shell:startup`) — `run.bat` shortcut should be there |
 | Gmail auth error | Delete `token_[account].json` and run `receipt_saver.py` manually to re-authorize |
 | TickTick tasks not created | Check `ticktick_token.json` exists; re-run `ticktick_auth.py` if needed |
 | No notifications | Run `pip install plyer` |
