@@ -289,7 +289,7 @@ def save_email_pdf(payload: dict, folder: Path,
 </body></html>"""
         dest = folder / "email.pdf"
         _WeasyprintHTML(string=full_html).write_pdf(str(dest))
-        log.info("    ✓ email.pdf")
+        log.info(f"    ✓ {dest}")
     except Exception as e:
         log.warning(f"    ⚠ email PDF failed: {e}")
 
@@ -387,7 +387,7 @@ def save_attachments(service, msg_id: str, payload: dict, folder: Path) -> list:
                 data = base64.urlsafe_b64decode(att["data"])
                 dest = folder / sanitize(filename)
                 dest.write_bytes(data)
-                log.info(f"    ✓ {filename}")
+                log.info(f"    ✓ {dest}")
                 saved.append(filename)
             if part.get("parts"):
                 walk(part["parts"])
@@ -463,6 +463,8 @@ def process_message(service, msg_id: str, account: dict) -> dict:
         folder      = base_dir / folder_name
         folder.mkdir(parents=True, exist_ok=True)
         log.info(f"[ICOUNT]   {folder_name}")
+        log.info(f"  Date: {date_str}  Account: {label}")
+        log.info(f"  Path: {folder}")
         save_email_pdf(msg["payload"], folder, subject, sender, date_str)
         create_icount_ticktick_task(folder_name, folder, label, msg_id, subject)
         return {"status": "saved", "folder_name": folder_name}
@@ -477,6 +479,8 @@ def process_message(service, msg_id: str, account: dict) -> dict:
         folder      = base_dir / folder_name
         folder.mkdir(parents=True, exist_ok=True)
         log.info(f"[KNOWN]    {folder_name}")
+        log.info(f"  Date: {date_str}  Account: {label}")
+        log.info(f"  Path: {folder}")
         save_attachments(service, msg_id, msg["payload"], folder)
         save_email_pdf(msg["payload"], folder, subject, sender, date_str)
         return {"status": "saved", "folder_name": folder_name}
@@ -491,6 +495,8 @@ def process_message(service, msg_id: str, account: dict) -> dict:
         folder      = base_dir / folder_name
         folder.mkdir(parents=True, exist_ok=True)
         log.info(f"[CUSTOM]   {folder_name}")
+        log.info(f"  Date: {date_str}  Account: {label}")
+        log.info(f"  Path: {folder}")
         save_attachments(service, msg_id, msg["payload"], folder)
         save_email_pdf(msg["payload"], folder, subject, sender, date_str)
         return {"status": "saved", "folder_name": folder_name}
@@ -502,6 +508,8 @@ def process_message(service, msg_id: str, account: dict) -> dict:
     folder        = MANUAL_DIR / folder_name
     folder.mkdir(parents=True, exist_ok=True)
     log.info(f"[FALLBACK] {folder_name}")
+    log.info(f"  Date: {date_str}  Account: {label}")
+    log.info(f"  Path: {folder}")
     save_attachments(service, msg_id, msg["payload"], folder)
     save_email_pdf(msg["payload"], folder, subject, sender, date_str)
     create_ticktick_task(folder_name, folder, label)

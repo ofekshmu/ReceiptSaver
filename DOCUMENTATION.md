@@ -66,7 +66,7 @@ YYYY_MM_DD - Seller Name - Product Description - [account]
 | `custom_rules.json` | User-defined sender rules — grows over time |
 | `fallback_log.json` | Log of all unrecognized emails |
 | `processed_ids.json` | Tracks every email already seen — prevents duplicates |
-| `receipt_saver.log` | Full activity log with timestamps |
+| `receipt_saver.log` | Full activity log with timestamps, full paths, and saved filenames |
 | `credentials_ofek.json` | Google OAuth credentials for ofek account |
 | `credentials_family.json` | Google OAuth credentials for family account |
 | `credentials_yuval.json` | Google OAuth credentials for yuval account |
