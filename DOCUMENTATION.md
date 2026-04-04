@@ -177,7 +177,8 @@ These were added through manual review sessions with Claude:
 | Sender Domain | Subject Contains | Seller | Product | Category | Base Dir |
 |---------------|-----------------|--------|---------|----------|----------|
 | `ladpc.co.il` | — | עיריית ראשון לציון | אישור תשלום | חשבנות/ארנונה | — |
-| `onecity.co.il` | — | עיריית חיפה | קבלת תשלום | חשבנות/ארנונה | נכסים\שלום שבאזי 7 |
+| `onecity.co.il` (sender contains חיפה) | — | עיריית חיפה | קבלת תשלום | חשבנות/ארנונה | נכסים\שלום שבאזי 7 |
+| `onecity.co.il` (sender contains ראשון לציון) | — | ראשון לציון החברה לב | קבלת תשלום | חשבנות/ארנונה | — |
 | `icount.co.il` | יפנולוגי | יפנולוגי | חשבונית מס קבלה | יפנולוגי | — |
 | `electra-power.co.il` | — | אלקטרה פאוור | חשבונית חשמל | חשבנות/חשמל | — |
 | `printernet.co.il` | פזגז | פזגז | חשבונית גז | חשבנות/גז | — |
