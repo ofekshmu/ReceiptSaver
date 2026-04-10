@@ -184,6 +184,9 @@ These were added through manual review sessions with Claude:
 | `electra-power.co.il` | — | אלקטרה פאוור | חשבונית חשמל | חשבנות/חשמל | — |
 | `printernet.co.il` | פזגז | פזגז | חשבונית גז | חשבנות/גז | — |
 | `elalinfo.co.il` | — | אל על | כרטיס טיסה | — | — |
+| `mail.anthropic.com` | — | Anthropic | Claude Pro מנוי | — | — |
+| `ace.co.il` | — | ACE | הזמנה | — | — |
+| `webmaster@icmega.org` | — | — | — | — | — | **excluded** (promotional newsletters) |
 | `icmega.org` | — | חבר | הזמנה | — | — |
 
 ---
@@ -323,6 +326,7 @@ Since Claude has Gmail MCP access to your `ofek` account, you can ask things lik
 - `product` — the product/service description in the folder name
 - `category` — optional, subdirectory path under the base directory (e.g. `חשבנות/ארנונה`). Omit or set to `null` for no subcategory.
 - `base_dir` — optional, absolute path to a different root directory. If omitted, defaults to `קבלות\`. Use for receipts belonging to a specific property or project.
+- `exclude` — optional, set to `true` to silently skip matching emails (e.g. promotional newsletters). No folder is created, logged as EXCLUDED.
 
 ### Categories
 

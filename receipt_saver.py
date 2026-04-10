@@ -364,6 +364,8 @@ def match_custom(sender: str, subject: str, body: str = ""):
         excluded    = exclude_frag.lower() in subject.lower() if exclude_frag else False
         body_ok     = body_frag in body                        if body_frag   else True
         if sender_ok and subject_ok and not excluded and body_ok:
+            if rule.get("exclude"):
+                return "__exclude__", None, None, None
             base_dir = Path(rule["base_dir"]) if rule.get("base_dir") else None
             product  = rule["product"]
             body_regex = rule.get("product_body_regex") or ""
@@ -548,6 +550,9 @@ def process_message(service, msg_id: str, account: dict) -> dict:
     custom = match_custom(sender, subject, body)
     if custom:
         seller, product, category, rule_base_dir = custom
+        if seller == "__exclude__":
+            log.info(f"EXCLUDED   {sender} — {subject[:60]}")
+            return {"status": "skipped"}
         root     = rule_base_dir if rule_base_dir else RECEIPTS_DIR
         base_dir = root / category if category else root
         folder_name = f"{date_str} - {sanitize(seller)} - {sanitize(product)} - {label}"

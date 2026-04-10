@@ -56,6 +56,26 @@
     "product": "כרטיס טיסה"
   },
   {
+    "_comment": "Anthropic — Claude Pro monthly subscription",
+    "match_sender_contains": "mail.anthropic.com",
+    "match_subject_contains": null,
+    "seller": "Anthropic",
+    "product": "Claude Pro מנוי"
+  },
+  {
+    "_comment": "ACE — hardware store receipts",
+    "match_sender_contains": "ace.co.il",
+    "match_subject_contains": null,
+    "seller": "ACE",
+    "product": "הזמנה"
+  },
+  {
+    "_comment": "HEVER WebMaster — promotional newsletters, not receipts",
+    "match_sender_contains": "webmaster@icmega.org",
+    "match_subject_contains": null,
+    "exclude": true
+  },
+  {
     "_comment": "חבר (HEVER) — אישורי הזמנה בלבד (body must contain מספר הזמנה)",
     "match_sender_contains": "icmega.org",
     "match_subject_contains": null,
