@@ -158,7 +158,7 @@ These are permanent rules that never need updating:
 
 | Sender Domain | Seller Name | Product | Category | Notes |
 |---------------|-------------|---------|----------|-------|
-| `wolt.com` | Wolt | Restaurant name | — | Extracted from attachment filename |
+| `wolt.com` | Wolt | Restaurant name | Wolt | Extracted from attachment filename |
 | `ksp.co.il` | KSP | חשבונית וקבלה | — | Electronics store |
 | `paneco.com` | פאנקו | הזמנה | — | Wine/drinks store |
 | `cellcominv.co.il` | סלקום | חשבונית חודשית | חשבנות/אינטרנט | Monthly internet bill |

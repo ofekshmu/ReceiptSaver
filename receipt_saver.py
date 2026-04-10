@@ -193,7 +193,7 @@ def _stripe_seller(sender, subject):
 
 KNOWN_RULES = [
     # (match_fn, seller, product_fn, category_or_None)
-    (lambda s, sub: sender_contains(s, "wolt.com"),         "Wolt",               _wolt_product,                       None),
+    (lambda s, sub: sender_contains(s, "wolt.com"),         "Wolt",               _wolt_product,                       "Wolt"),
     (lambda s, sub: sender_contains(s, "ksp.co.il"),        "KSP",                lambda sub, att: "חשבונית וקבלה",   None),
     (lambda s, sub: sender_contains(s, "paneco.com"),       "פאנקו",              lambda sub, att: "הזמנה",            None),
     (lambda s, sub: sender_contains(s, "cellcominv.co.il"), "סלקום",              lambda sub, att: "חשבונית חודשית",  "חשבנות/אינטרנט"),
