@@ -72,7 +72,10 @@ YYYY_MM_DD - Seller Name - Product Description - [account]
 
 | File | Purpose |
 |------|---------|
-| `receipt_saver.py` | Main script — runs at every login |
+| `receipt_saver.py` | Main script — runs at every login. Provider-agnostic: dispatches each account to `gmail_provider` or `outlook_provider` based on its `"provider"` field, then processes a normalized message dict |
+| `gmail_provider.py` | Gmail-specific implementation of the provider interface (`get_service`, `list_candidate_ids`, `fetch_message`) — houses `build_gmail_query()` and the Gmail payload parsing that used to live in `receipt_saver.py` |
+| `outlook_provider.py` | Placeholder for the Microsoft 365 provider — not yet implemented; no Outlook account is wired into `ACCOUNTS` yet |
+| `test_receipt_saver.py` | Unit tests for `parse_date()` (RFC 2822 and ISO 8601 timestamp formats) |
 | `japanologia_backfill.py` | One-time script — backfills Japanese lesson attachments since April 15, 2026 |
 | `custom_rules.json` | User-defined sender rules — grows over time |
 | `fallback_log.json` | Log of all unrecognized emails |
@@ -293,7 +296,7 @@ The script builds the Gmail query dynamically at runtime:
 )
 ```
 
-The `from:` exceptions are generated automatically from every domain-based `match_sender_contains` entry in `custom_rules.json`. Adding a new custom rule with a domain automatically updates the query — no manual changes needed. The Japanese lesson clause is hardcoded in `build_gmail_query()`.
+The `from:` exceptions are generated automatically from every domain-based `match_sender_contains` entry in `custom_rules.json`. Adding a new custom rule with a domain automatically updates the query — no manual changes needed. The Japanese lesson clause is hardcoded in `build_gmail_query()`, which now lives in `gmail_provider.py` (called via `gmail_provider.list_candidate_ids()`).
 
 **Key behaviors:**
 - Emails with attachments matching subject keywords are always included
