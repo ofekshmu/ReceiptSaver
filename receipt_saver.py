@@ -315,6 +315,10 @@ def load_custom_rules() -> list:
     return []
 
 def match_custom(sender: str, subject: str, body: str = ""):
+    # Normalize whitespace: HTML-to-text conversion (e.g. Outlook's Graph API)
+    # can leave non-breaking spaces and irregular line wraps that would
+    # otherwise silently defeat match_body_contains/product_body_regex.
+    body = re.sub(r"[\s\xa0]+", " ", body)
     for rule in load_custom_rules():
         sender_frag   = rule.get("match_sender_contains", "")
         subject_frag  = rule.get("match_subject_contains") or ""

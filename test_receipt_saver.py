@@ -37,6 +37,14 @@ class TestSternumPayslipRule(unittest.TestCase):
         seller, product, category, base_dir = result
         self.assertEqual(product, "תלוש שכר")
 
+    def test_extracts_month_and_year_despite_nbsp_and_line_wrap(self):
+        # Outlook's HTML-to-text body conversion can leave non-breaking
+        # spaces (U+00A0) and mid-sentence newlines in place of normal spaces.
+        body = 'היי אופק,\n\nמצ"ב תלוש\xa0שכר\nלחודש\xa0יוני 2026.\n\nבברכה,'
+        result = match_custom("billing@sternum-sec.com", "some subject line", body)
+        seller, product, category, base_dir = result
+        self.assertEqual(product, "תלוש שכר לחודש יוני 2026")
+
 
 if __name__ == "__main__":
     unittest.main()
