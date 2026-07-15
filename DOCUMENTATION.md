@@ -74,7 +74,7 @@ YYYY_MM_DD - Seller Name - Product Description - [account]
 |------|---------|
 | `receipt_saver.py` | Main script — runs at every login. Provider-agnostic: dispatches each account to `gmail_provider` or `outlook_provider` based on its `"provider"` field, then processes a normalized message dict |
 | `gmail_provider.py` | Gmail-specific implementation of the provider interface (`get_service`, `list_candidate_ids`, `fetch_message`) — houses `build_gmail_query()` and the Gmail payload parsing that used to live in `receipt_saver.py` |
-| `outlook_provider.py` | Placeholder for the Microsoft 365 provider — not yet implemented; no Outlook account is wired into `ACCOUNTS` yet |
+| `outlook_provider.py` | Microsoft 365 provider implementation (`get_service`, `list_candidate_ids`, `fetch_message` via Microsoft Graph + MSAL device-code auth) — not yet wired to a live Outlook account in `ACCOUNTS` |
 | `test_receipt_saver.py` | Unit tests for `parse_date()` (RFC 2822 and ISO 8601 timestamp formats) |
 | `japanologia_backfill.py` | One-time script — backfills Japanese lesson attachments since April 15, 2026 |
 | `custom_rules.json` | User-defined sender rules — grows over time |

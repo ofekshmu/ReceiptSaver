@@ -15,6 +15,12 @@ class TestIsRelevant(unittest.TestCase):
     def test_japanese_lesson_subject_matches_without_attachment_flag(self):
         self.assertTrue(_is_relevant("teacher@example.com", "סיכום שיעור יפנית 1.6", False, []))
 
+    def test_attachment_alone_without_keyword_or_domain_is_irrelevant(self):
+        self.assertFalse(_is_relevant("someone@example.com", "photos from the trip", True, []))
+
+    def test_matching_is_case_insensitive(self):
+        self.assertTrue(_is_relevant("BILLING@STERNUM-SEC.COM", "INVOICE for July", True, []))
+
 
 if __name__ == "__main__":
     unittest.main()

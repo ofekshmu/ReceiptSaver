@@ -100,7 +100,7 @@ def _is_relevant(sender: str, subject: str, has_attachment: bool, domains: list)
 
 
 def list_candidate_ids(service, account: dict, custom_rules_file: Path) -> list:
-    since = (datetime.datetime.utcnow() - datetime.timedelta(days=60)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    since = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=60)).strftime("%Y-%m-%dT%H:%M:%SZ")
     headers = {"Authorization": f"Bearer {service['access_token']}"}
     url = (
         f"{GRAPH_BASE}/me/mailFolders/inbox/messages"
@@ -145,7 +145,8 @@ def fetch_message(service, msg_id: str, account: dict) -> dict:
     headers = {"Authorization": f"Bearer {access_token}"}
     resp = requests.get(
         f"{GRAPH_BASE}/me/messages/{msg_id}"
-        f"?$select=id,subject,from,receivedDateTime,body,hasAttachments",
+        f"?$select=id,subject,from,receivedDateTime,body,hasAttachments"
+        f"&$expand=attachments($select=name)",
         headers=headers, timeout=15,
     )
     resp.raise_for_status()
@@ -158,12 +159,25 @@ def fetch_message(service, msg_id: str, account: dict) -> dict:
 
     body      = m.get("body", {}) or {}
     body_html = body.get("content", "") if body.get("contentType") == "html" else ""
-    body_text = body.get("content", "") if body.get("contentType") == "text" else ""
+
+    # The main GET above returns body content in whatever contentType the
+    # message natively has (almost always "html" for real senders), so we
+    # can't rely on it for plain text. Do a second lightweight GET with the
+    # Prefer header to reliably force Graph to return plain text regardless
+    # of the message's native format.
+    text_resp = requests.get(
+        f"{GRAPH_BASE}/me/messages/{msg_id}?$select=body",
+        headers={**headers, "Prefer": 'outlook.body-content-type="text"'},
+        timeout=15,
+    )
+    text_resp.raise_for_status()
+    body_text = ((text_resp.json().get("body") or {}).get("content", "")) or ""
+
     if not body_html and body_text:
         body_html = f"<pre style='font-family:Arial,sans-serif;white-space:pre-wrap'>{body_text}</pre>"
 
-    atts_cache = _fetch_attachments(access_token, msg_id) if m.get("hasAttachments") else []
-    first_attachment_name = atts_cache[0][0] if atts_cache else ""
+    attachment_names = [a["name"] for a in m.get("attachments", []) if a.get("name")]
+    first_attachment_name = attachment_names[0] if attachment_names else ""
 
     return {
         "id": msg_id,
@@ -174,6 +188,6 @@ def fetch_message(service, msg_id: str, account: dict) -> dict:
         "body_text": body_text,
         "body_html": body_html,
         "first_attachment_name": first_attachment_name,
-        "attachments": lambda: atts_cache,
+        "attachments": lambda: _fetch_attachments(access_token, msg_id),
         "link": _outlook_link(msg_id),
     }
