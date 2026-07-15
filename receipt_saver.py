@@ -136,6 +136,7 @@ def extract_display_name(sender: str) -> str:
     return sanitize(m.group(1).strip()) if m else sanitize(sender.split("@")[0])
 
 def parse_date(date_raw: str) -> str:
+    # Gmail's Date header is RFC 2822; Microsoft Graph's receivedDateTime is ISO 8601.
     try:
         from email.utils import parsedate_to_datetime
         return parsedate_to_datetime(date_raw).strftime("%Y_%m_%d")
