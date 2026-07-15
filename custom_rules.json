@@ -208,5 +208,17 @@
     "seller": "צה״ל",
     "product": "אישור מילואים",
     "base_dir": "C:\\Users\\ofeks\\OneDrive\\Ofek\\Documents\\צבא\\מילואים"
+  },
+  {
+    "_comment": "Sternum payslip (billing@sternum-sec.com)",
+    "match_sender_contains": "billing@sternum-sec.com",
+    "match_subject_contains": null,
+    "exclude_subject_contains": null,
+    "match_body_contains": "תלוש שכר",
+    "product_body_regex": "(תלוש שכר לחודש \\S+ \\d{4})",
+    "seller": "משכורת",
+    "product": "תלוש שכר",
+    "category": null,
+    "base_dir": "C:\\Users\\ofeks\\OneDrive\\Ofek\\Work\\Sternum\\משכורות"
   }
 ]

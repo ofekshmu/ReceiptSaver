@@ -231,6 +231,7 @@ These were added through manual review sessions with Claude:
 | `hyp.co.il` | — | upapp | כניסה לחדר כושר אייקון | — | — |
 | `planetcinema.co.il` | — | Planet Cinema | כרטיסים | — | — |
 | `smartbee.co.il` | — | גן ילדים דיסני ראשון | שכר לימוד | — | — |
+| `billing@sternum-sec.com` | — | משכורת | תלוש שכר (extracted from body: `תלוש שכר לחודש <month> <year>`) | — | Work\Sternum\משכורות |
 
 ---
 

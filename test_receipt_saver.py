@@ -1,5 +1,7 @@
 import unittest
-from receipt_saver import parse_date
+from pathlib import Path
+
+from receipt_saver import parse_date, match_custom
 
 
 class TestParseDate(unittest.TestCase):
@@ -12,6 +14,28 @@ class TestParseDate(unittest.TestCase):
     def test_garbage_falls_back_to_today(self):
         result = parse_date("not a date")
         self.assertRegex(result, r"^\d{4}_\d{2}_\d{2}$")
+
+
+class TestSternumPayslipRule(unittest.TestCase):
+    def test_extracts_month_and_year_from_body(self):
+        result = match_custom(
+            "billing@sternum-sec.com",
+            "some subject line",
+            'היי אופק,\n\nמצ"ב תלוש שכר לחודש יוני 2026.\n\nבברכה,',
+        )
+        seller, product, category, base_dir = result
+        self.assertEqual(seller, "משכורת")
+        self.assertEqual(product, "תלוש שכר לחודש יוני 2026")
+        self.assertEqual(base_dir, Path(r"C:\Users\ofeks\OneDrive\Ofek\Work\Sternum\משכורות"))
+
+    def test_falls_back_to_static_product_if_regex_does_not_match(self):
+        result = match_custom(
+            "billing@sternum-sec.com",
+            "some subject line",
+            "תלוש שכר בפורמט שונה לגמרי",
+        )
+        seller, product, category, base_dir = result
+        self.assertEqual(product, "תלוש שכר")
 
 
 if __name__ == "__main__":
