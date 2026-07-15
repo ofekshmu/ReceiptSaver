@@ -51,6 +51,7 @@ except Exception:
 # ══════════════════════════════════════════════════════════════════════════
 RECEIPTS_DIR        = Path(r"C:\Users\ofeks\OneDrive\Documents\קבלות")
 MANUAL_DIR          = RECEIPTS_DIR / "_לטיפול ידני"
+JAPANOLOGIA_DIR     = Path(r"C:\Users\ofeks\OneDrive\Ofek\Japanese Lessons\Japanologia")
 SCRIPT_DIR          = Path(r"C:\Users\ofeks\Scripts\ReceiptSaver")
 PROCESSED_FILE      = SCRIPT_DIR / "processed_ids.json"
 CUSTOM_RULES_FILE   = SCRIPT_DIR / "custom_rules.json"
@@ -82,6 +83,8 @@ ACCOUNTS = [
 
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
+_LESSON_SUBJECT_RE = re.compile(r"סיכום שיעור יפנית\s+(\d{1,2})\.(\d{1,2})")
+
 GMAIL_SUBJECT_KEYWORDS = (
     'subject:receipt OR subject:invoice OR subject:קבלה OR subject:קבלת '
     'OR subject:חשבונית OR subject:אישור OR subject:הזמנה '
@@ -103,6 +106,7 @@ def build_gmail_query() -> str:
                 base += f" OR {clause}"
     except Exception:
         pass
+    base += ' OR (has:attachment AND subject:"סיכום שיעור יפנית")'
     return base + ")"
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -156,6 +160,19 @@ def parse_date(date_raw: str) -> str:
         return parsedate_to_datetime(date_raw).strftime("%Y_%m_%d")
     except Exception:
         return datetime.date.today().strftime("%Y_%m_%d")
+
+def parse_lesson_folder(subject: str, email_date: str) -> str | None:
+    """Return YYYY_MM_DD folder name from lesson subject (e.g. 'סיכום שיעור יפנית 1.6').
+    Year is taken from the email send date so this works across year boundaries."""
+    m = _LESSON_SUBJECT_RE.search(subject)
+    if not m:
+        return None
+    day, month = int(m.group(1)), int(m.group(2))
+    year = int(email_date[:4])  # "2026_05_18" -> 2026
+    try:
+        return datetime.date(year, month, day).strftime("%Y_%m_%d")
+    except ValueError:
+        return None
 
 def sender_contains(sender: str, *fragments: str) -> bool:
     return any(f in sender.lower() for f in fragments)
@@ -507,6 +524,16 @@ def process_message(service, msg_id: str, account: dict) -> dict:
     sender    = headers.get("From", "")
     date_str  = parse_date(headers.get("Date", ""))
     first_att = first_attachment_name(msg["payload"])
+
+    # ── Japanese lesson summary ───────────────────────────────────────────
+    if account["label"] == "ofek":
+        lesson_folder = parse_lesson_folder(subject, date_str)
+        if lesson_folder:
+            dest = JAPANOLOGIA_DIR / lesson_folder
+            dest.mkdir(parents=True, exist_ok=True)
+            files = save_attachments(service, msg_id, msg["payload"], dest)
+            _log_saved("JAPANOLOGIA", lesson_folder, sender, dest, files)
+            return {"status": "saved", "folder_name": lesson_folder}
 
     # ── iCount special case ────────────────────────────────────────────────
     # PDF is inside a link in the email body — skip attachments (just logo),

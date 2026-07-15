@@ -1,5 +1,53 @@
 [
   {
+    "_comment": "מקס ברנר — receipts via morning.co billing platform",
+    "match_sender_contains": "morning.co",
+    "match_subject_contains": "מקס ברנר",
+    "seller": "מקס ברנר",
+    "product": "חשבונית"
+  },
+  {
+    "_comment": "שירות התשלומים הממשלתי — government payments",
+    "match_sender_contains": "ecom.gov.il",
+    "match_subject_contains": null,
+    "seller": "שירות התשלומים הממשלתי",
+    "product": "תשלום"
+  },
+  {
+    "_comment": "עיריית חיפה — exclude payment voucher notices (not receipts)",
+    "match_sender_contains": "haifa.muni.il",
+    "match_subject_contains": "שובר תשלום",
+    "exclude": true
+  },
+  {
+    "_comment": "Baby Land — receipts via Tranzila payment platform",
+    "match_sender_contains": "tranzila.com",
+    "match_subject_contains": "baby-land",
+    "seller": "Baby Land",
+    "product": "חשבונית"
+  },
+  {
+    "_comment": "חברת חשמל IEC — exclude service activation notices (not receipts)",
+    "match_sender_contains": "iec.co.il",
+    "match_subject_contains": "אישור הפעלת שירות",
+    "exclude": true
+  },
+  {
+    "_comment": "on-ev — EV charging invoices (via driivz platform)",
+    "match_sender_contains": "mg.driivz.com",
+    "match_subject_contains": null,
+    "seller": "on-ev",
+    "product": "טעינה חשמלית"
+  },
+  {
+    "_comment": "Interactive Broker — deposit confirmations",
+    "match_sender_contains": "inter-il.com",
+    "match_subject_contains": null,
+    "seller": "Interactive Broker",
+    "product": "אישור הפקדה",
+    "category": "Interactive Broker"
+  },
+  {
     "_comment": "עיריית ראשון לציון — ביט תשלומים",
     "match_sender_contains": "ladpc.co.il",
     "match_subject_contains": null,
@@ -84,5 +132,81 @@
     "product_body_regex": "שם הפריט[^\\n]+\\n([^\\n]+)",
     "seller": "חבר",
     "product": "הזמנה"
+  },
+  {
+    "_comment": "אביר ספורט — חשבוניות מס/קבלה",
+    "match_sender_contains": "abirsport.co.il",
+    "match_subject_contains": null,
+    "seller": "אביר ספורט",
+    "product": "כדור פיזיו"
+  },
+  {
+    "_comment": "upapp — כניסה לחדר כושר אייקון (via hyp.co.il)",
+    "match_sender_contains": "hyp.co.il",
+    "match_subject_contains": null,
+    "seller": "upapp",
+    "product": "כניסה לחדר כושר אייקון"
+  },
+  {
+    "_comment": "חברת חשמל לישראל (IEC) — חוזה 349305852 שייך לנכס שלום שבאזי 7, לא לבית",
+    "match_sender_contains": "iec.co.il",
+    "match_subject_contains": "349305852",
+    "seller": "חברת חשמל לישראל",
+    "product": "חשבונית חשמל",
+    "base_dir": "C:\\Users\\ofeks\\OneDrive\\Documents\\נכסים\\שלום שבאזי 7",
+    "category": "חשבנות/חשמל"
+  },
+  {
+    "_comment": "חברת חשמל לישראל (IEC) — חשבוניות חשמל בפועל (לא הודעות הפעלת שירות)",
+    "match_sender_contains": "iec.co.il",
+    "match_subject_contains": null,
+    "seller": "חברת חשמל לישראל",
+    "product": "חשבונית חשמל",
+    "category": "חשבנות/חשמל"
+  },
+  {
+    "_comment": "חוזה 349305852 (נכס שלום שבאזי 7) — קליטת חשבונות עתידיים מכל ספק (מים/גז/וכו')",
+    "match_sender_contains": null,
+    "match_subject_contains": "349305852",
+    "seller": "שלום שבאזי 7",
+    "product": "חשבון",
+    "base_dir": "C:\\Users\\ofeks\\OneDrive\\Documents\\נכסים\\שלום שבאזי 7"
+  },
+  {
+    "_comment": "קבוצת בר סרוסי — receipts via morning.co billing platform, property-related",
+    "match_sender_contains": "morning.co",
+    "match_subject_contains": "בר סרוסי",
+    "seller": "קבוצת בר סרוסי",
+    "product": "חשבונית",
+    "base_dir": "C:\\Users\\ofeks\\OneDrive\\Documents\\נכסים"
+  },
+  {
+    "_comment": "אמריקן דיגיטקס — receipts via morning.co billing platform",
+    "match_sender_contains": "morning.co",
+    "match_subject_contains": "אמריקן דיגיטקס",
+    "seller": "אמריקן דיגיטקס",
+    "product": "חשבונית"
+  },
+  {
+    "_comment": "Planet Cinema — אישורי הזמנת כרטיסים",
+    "match_sender_contains": "planetcinema.co.il",
+    "match_subject_contains": null,
+    "seller": "Planet Cinema",
+    "product": "כרטיסים"
+  },
+  {
+    "_comment": "גן ילדים דיסני ראשון — חשבוניות/קבלות שכר לימוד (via smartbee.co.il)",
+    "match_sender_contains": "smartbee.co.il",
+    "match_subject_contains": null,
+    "seller": "גן ילדים דיסני ראשון",
+    "product": "שכר לימוד"
+  },
+  {
+    "_comment": "צה״ל — טופס אישור ימי מילואים, לא קבלה אך נשמר לתיעוד",
+    "match_sender_contains": "miluim.idf.il",
+    "match_subject_contains": null,
+    "seller": "צה״ל",
+    "product": "אישור מילואים",
+    "base_dir": "C:\\Users\\ofeks\\OneDrive\\Ofek\\Documents\\צבא\\מילואים"
   }
 ]

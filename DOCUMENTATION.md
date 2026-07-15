@@ -8,7 +8,7 @@ Receipt Saver is an automated Python-based system that runs on Windows startup a
 
 ## Folder Structure
 
-### Output Directory
+### Receipts Directory
 ```
 C:\Users\ofeks\OneDrive\Documents\קבלות\
 │
@@ -35,6 +35,16 @@ C:\Users\ofeks\OneDrive\Documents\קבלות\
         ├── attachment.pdf
         └── email.pdf
 ```
+
+### Japanese Lessons Directory
+```
+C:\Users\ofeks\OneDrive\Ofek\Japanese Lessons\Japanologia\
+│
+└── YYYY_MM_DD\                          ← lesson date from subject (e.g. 2026_06_01)
+    ├── סיכום שיעור יפנית 泉 1.6.pdf
+    └── תרגיל מסכם פרק 37.pdf
+```
+Populated by `receipt_saver.py` for every new "סיכום שיעור יפנית D.M" email received on the `ofek` account. Use `japanologia_backfill.py` to backfill historical emails.
 
 ### Folder Naming Format
 ```
@@ -63,6 +73,7 @@ YYYY_MM_DD - Seller Name - Product Description - [account]
 | File | Purpose |
 |------|---------|
 | `receipt_saver.py` | Main script — runs at every login |
+| `japanologia_backfill.py` | One-time script — backfills Japanese lesson attachments since April 15, 2026 |
 | `custom_rules.json` | User-defined sender rules — grows over time |
 | `fallback_log.json` | Log of all unrecognized emails |
 | `processed_ids.json` | Tracks every email already seen — prevents duplicates |
@@ -93,6 +104,21 @@ Every email found in Gmail goes through the following pipeline:
            ┌─────────────────────┐
            │  Is it in SENT?     │──── YES ──→ SKIP (ignore silently)
            └─────────┬───────────┘
+                     │ NO
+                     ▼
+           ┌──────────────────────────┐
+           │  Is subject "סיכום       │
+           │  שיעור יפנית D.M"?       │
+           │  (ofek account only)     │
+           └─────────┬────────────────┘
+                     │ YES
+                     ▼
+        ┌─────────────────────────────────────────┐
+        │  JAPANOLOGIA PATH                        │
+        │  • Create folder YYYY_MM_DD under        │
+        │    Japanese Lessons\Japanologia\         │
+        │  • Save all attachments (no email.pdf)   │
+        └─────────────────────────────────────────┘
                      │ NO
                      ▼
            ┌─────────────────────┐
@@ -177,6 +203,16 @@ These were added through manual review sessions with Claude:
 
 | Sender Domain | Subject Contains | Seller | Product | Category | Base Dir |
 |---------------|-----------------|--------|---------|----------|----------|
+| `morning.co` | מקס ברנר | מקס ברנר | חשבונית | — | — |
+| `morning.co` | בר סרוסי | בר סרוסי השקעות | חשבונית | — | — |
+| `morning.co` | אמריקן דיגיטקס | אמריקן דיגיטקס | חשבונית | — | — |
+| `ecom.gov.il` | — | שירות התשלומים הממשלתי | תשלום | — | — |
+| `haifa.muni.il` | שובר תשלום | — | — | — | — | **excluded** (payment voucher notices, not receipts) |
+| `tranzila.com` | baby-land | Baby Land | חשבונית | — | — |
+| `iec.co.il` | אישור הפעלת שירות | — | — | — | — | **excluded** (service activation notices, not receipts) |
+| `iec.co.il` | — | חברת חשמל לישראל | חשבונית חשמל | חשבנות/חשמל | — |
+| `mg.driivz.com` | — | on-ev | טעינה חשמלית | — | — |
+| `inter-il.com` | — | Interactive Broker | אישור הפקדה | Interactive Broker | — |
 | `ladpc.co.il` | — | עיריית ראשון לציון | אישור תשלום | חשבנות/ארנונה | — |
 | `onecity.co.il` (sender contains חיפה) | — | עיריית חיפה | קבלת תשלום | חשבנות/ארנונה | נכסים\שלום שבאזי 7 |
 | `onecity.co.il` (sender contains ראשון לציון) | — | ראשון לציון החברה לב | קבלת תשלום | חשבנות/ארנונה | — |
@@ -188,6 +224,10 @@ These were added through manual review sessions with Claude:
 | `ace.co.il` | — | ACE | הזמנה | — | — |
 | `webmaster@icmega.org` | — | — | — | — | — | **excluded** (promotional newsletters) |
 | `icmega.org` | — | חבר | הזמנה | — | — |
+| `abirsport.co.il` | — | אביר ספורט | כדור פיזיו | — | — |
+| `hyp.co.il` | — | upapp | כניסה לחדר כושר אייקון | — | — |
+| `planetcinema.co.il` | — | Planet Cinema | כרטיסים | — | — |
+| `smartbee.co.il` | — | גן ילדים דיסני ראשון | שכר לימוד | — | — |
 
 ---
 
@@ -227,21 +267,33 @@ The script shows three types of Windows toast notifications:
 The script builds the Gmail query dynamically at runtime:
 
 ```
--in:sent newer_than:60d (
+-in:sent -subject:פרסומת newer_than:60d (
   (has:attachment AND (subject:receipt OR subject:invoice OR subject:קבלה OR subject:קבלת
    OR subject:חשבונית OR subject:אישור OR subject:הזמנה
    OR subject:תשלום OR subject:purchase OR subject:payment))
+  OR from:morning.co
+  OR from:ecom.gov.il
+  OR (from:haifa.muni.il -subject:...)
+  OR from:tranzila.com
+  OR from:iec.co.il
+  OR from:mg.driivz.com
+  OR from:inter-il.com
   OR from:ladpc.co.il
   OR from:icount.co.il
   OR from:electra-power.co.il
   OR from:printernet.co.il
   OR from:elalinfo.co.il
   OR from:icmega.org
+  OR from:abirsport.co.il
+  OR from:hyp.co.il
+  OR from:planetcinema.co.il
+  OR from:smartbee.co.il
+  OR (has:attachment AND subject:"סיכום שיעור יפנית")
   ...
 )
 ```
 
-The `from:` exceptions are generated automatically from every domain-based `match_sender_contains` entry in `custom_rules.json`. Adding a new custom rule with a domain automatically updates the query — no manual changes needed.
+The `from:` exceptions are generated automatically from every domain-based `match_sender_contains` entry in `custom_rules.json`. Adding a new custom rule with a domain automatically updates the query — no manual changes needed. The Japanese lesson clause is hardcoded in `build_gmail_query()`.
 
 **Key behaviors:**
 - Emails with attachments matching subject keywords are always included
