@@ -81,6 +81,13 @@ ACCOUNTS = [
         "creds_file":  SCRIPT_DIR / "credentials_yuval.json",
         "token_file":  SCRIPT_DIR / "token_yuval.json",
     },
+    {
+        "label":       "sternum",
+        "email":       "ofeks@sternum-sec.com",
+        "provider":    "outlook",
+        "creds_file":  SCRIPT_DIR / "credentials_sternum.json",
+        "token_file":  SCRIPT_DIR / "token_sternum.json",
+    },
 ]
 
 PROVIDERS = {
