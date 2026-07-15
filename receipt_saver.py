@@ -2,10 +2,11 @@
 receipt_saver.py
 ----------------
 Runs on Windows startup via Task Scheduler.
-Scans three Gmail accounts and saves receipt attachments.
+Scans four mailboxes (three Gmail, one Microsoft 365) and saves receipt
+attachments.
 
 Folder format: YYYY-MM-DD - Seller - Product - [account]
-  account labels: ofek | family | yuval
+  account labels: ofek | family | yuval | sternum
 
 Decision pipeline per email:
   1. Skip if in SENT folder
@@ -18,21 +19,19 @@ Decision pipeline per email:
 
 Requirements:
     pip install google-auth google-auth-oauthlib google-auth-httplib2
-                google-api-python-client requests plyer weasyprint
+                google-api-python-client requests plyer weasyprint msal
 """
 
 import re
-import base64
 import json
 import logging
 import datetime
 from pathlib import Path
 
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from googleapiclient.discovery import build
 import requests
+
+import gmail_provider
+import outlook_provider
 
 try:
     from plyer import notification as _plyer_notification
@@ -64,50 +63,32 @@ ACCOUNTS = [
     {
         "label":       "ofek",
         "email":       "ofek.shmuel1@gmail.com",
+        "provider":    "gmail",
         "creds_file":  SCRIPT_DIR / "credentials_ofek.json",
         "token_file":  SCRIPT_DIR / "token_ofek.json",
     },
     {
         "label":       "family",
         "email":       "shmuelfamily21@gmail.com",
+        "provider":    "gmail",
         "creds_file":  SCRIPT_DIR / "credentials_family.json",
         "token_file":  SCRIPT_DIR / "token_family.json",
     },
     {
         "label":       "yuval",
         "email":       "yuvalritsker@gmail.com",
+        "provider":    "gmail",
         "creds_file":  SCRIPT_DIR / "credentials_yuval.json",
         "token_file":  SCRIPT_DIR / "token_yuval.json",
     },
 ]
 
-SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+PROVIDERS = {
+    "gmail":   gmail_provider,
+    "outlook": outlook_provider,
+}
 
 _LESSON_SUBJECT_RE = re.compile(r"סיכום שיעור יפנית\s+(\d{1,2})\.(\d{1,2})")
-
-GMAIL_SUBJECT_KEYWORDS = (
-    'subject:receipt OR subject:invoice OR subject:קבלה OR subject:קבלת '
-    'OR subject:חשבונית OR subject:אישור OR subject:הזמנה '
-    'OR subject:תשלום OR subject:purchase OR subject:payment'
-)
-
-def build_gmail_query() -> str:
-    """Build Gmail search query, adding from: exceptions for domain-based custom rules."""
-    base = f'-in:sent -subject:פרסומת newer_than:60d ((has:attachment AND ({GMAIL_SUBJECT_KEYWORDS}))'
-    try:
-        rules = json.loads(CUSTOM_RULES_FILE.read_text(encoding="utf-8"))
-        for rule in rules:
-            sender  = rule.get("match_sender_contains", "") or ""
-            exclude = rule.get("exclude_subject_contains", "") or ""
-            if "." in sender:  # domain-based match (e.g. icmega.org)
-                clause = f"from:{sender}"
-                if exclude:
-                    clause = f"({clause} -subject:{exclude})"
-                base += f" OR {clause}"
-    except Exception:
-        pass
-    base += ' OR (has:attachment AND subject:"סיכום שיעור יפנית")'
-    return base + ")"
 
 # ══════════════════════════════════════════════════════════════════════════
 # LOGGING
@@ -159,7 +140,12 @@ def parse_date(date_raw: str) -> str:
         from email.utils import parsedate_to_datetime
         return parsedate_to_datetime(date_raw).strftime("%Y_%m_%d")
     except Exception:
-        return datetime.date.today().strftime("%Y_%m_%d")
+        pass
+    try:
+        return datetime.datetime.fromisoformat(date_raw.replace("Z", "+00:00")).strftime("%Y_%m_%d")
+    except Exception:
+        pass
+    return datetime.date.today().strftime("%Y_%m_%d")
 
 def parse_lesson_folder(subject: str, email_date: str) -> str | None:
     """Return YYYY_MM_DD folder name from lesson subject (e.g. 'סיכום שיעור יפנית 1.6').
@@ -176,12 +162,6 @@ def parse_lesson_folder(subject: str, email_date: str) -> str | None:
 
 def sender_contains(sender: str, *fragments: str) -> bool:
     return any(f in sender.lower() for f in fragments)
-
-def first_attachment_name(payload: dict) -> str:
-    for part in payload.get("parts", []):
-        if part.get("filename"):
-            return part["filename"]
-    return ""
 
 # ══════════════════════════════════════════════════════════════════════════
 # HARDCODED KNOWN RULES
@@ -252,11 +232,8 @@ def match_hardcoded(sender: str, subject: str):
 def is_icount(sender: str, subject: str) -> bool:
     return "icount.co.il" in sender.lower()
 
-def gmail_link(msg_id: str) -> str:
-    return f"https://mail.google.com/mail/u/0/#inbox/{msg_id}"
-
 def create_icount_ticktick_task(folder_name: str, folder_path: Path,
-                                 account_label: str, msg_id: str, subject: str):
+                                 account_label: str, link: str, subject: str):
     if not TICKTICK_TOKEN_FILE.exists():
         log.warning("ticktick_token.json missing — skipping TickTick task")
         return
@@ -266,7 +243,7 @@ def create_icount_ticktick_task(folder_name: str, folder_path: Path,
         "content": (
             f"חשבונית iCount — הPDF נמצא בקישור בתוך המייל.\n\n"
             f"פתח את המייל וגלול לקישור 'לצפייה':\n"
-            f"{gmail_link(msg_id)}\n\n"
+            f"{link}\n\n"
             f"שמור את הPDF לתיקייה:\n{folder_path}"
         ),
         "priority": 3,
@@ -289,54 +266,13 @@ def create_icount_ticktick_task(folder_name: str, folder_path: Path,
 # EMAIL → PDF
 # ══════════════════════════════════════════════════════════════════════════
 
-def get_body_text(payload: dict) -> str:
-    """Extract plain text from email payload (no HTML)."""
-    result = []
-
-    def walk(part):
-        mime = part.get("mimeType", "")
-        data = part.get("body", {}).get("data", "")
-        if data and mime == "text/plain":
-            result.append(base64.urlsafe_b64decode(data).decode("utf-8", errors="replace"))
-        for sub in part.get("parts", []):
-            walk(sub)
-
-    walk(payload)
-    return "\n".join(result)
-
-def get_body_html(payload: dict) -> str:
-    """Extract HTML body, falling back to plain text wrapped in <pre>."""
-    html_part  = None
-    plain_part = None
-
-    def walk(part):
-        nonlocal html_part, plain_part
-        mime = part.get("mimeType", "")
-        data = part.get("body", {}).get("data", "")
-        if data:
-            decoded = base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
-            if mime == "text/html" and not html_part:
-                html_part = decoded
-            elif mime == "text/plain" and not plain_part:
-                plain_part = decoded
-        for sub in part.get("parts", []):
-            walk(sub)
-
-    walk(payload)
-    if html_part:
-        return html_part
-    if plain_part:
-        return f"<pre style='font-family:Arial,sans-serif;white-space:pre-wrap'>{plain_part}</pre>"
-    return "<p>(no body)</p>"
-
-def save_email_pdf(payload: dict, folder: Path,
+def save_email_pdf(body_html: str, folder: Path,
                    subject: str, sender: str, date_str: str):
     """Render the email HTML to email.pdf inside the folder. Returns saved path or None."""
     if not _WEASYPRINT_OK:
         log.warning("weasyprint not available — skipping email.pdf")
         return None
     try:
-        body_html = get_body_html(payload)
         full_html = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8">
 <style>
@@ -428,46 +364,17 @@ def save_processed(ids: set):
     PROCESSED_FILE.write_text(json.dumps(list(ids)), encoding="utf-8")
 
 # ══════════════════════════════════════════════════════════════════════════
-# GMAIL
+# ATTACHMENT SAVING
 # ══════════════════════════════════════════════════════════════════════════
 
-def get_gmail_service(account: dict):
-    creds = None
-    token_file = account["token_file"]
-    creds_file = account["creds_file"]
-
-    if token_file.exists():
-        creds = Credentials.from_authorized_user_file(token_file, SCOPES)
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file(creds_file, SCOPES)
-            # Hint the browser to use the right account
-            creds = flow.run_local_server(
-                port=0,
-                login_hint=account["email"],
-            )
-        token_file.write_text(creds.to_json(), encoding="utf-8")
-    return build("gmail", "v1", credentials=creds)
-
-def save_attachments(service, msg_id: str, payload: dict, folder: Path) -> list:
+def save_attachments(attachments_fn, folder: Path) -> list:
+    """attachments_fn is a zero-arg callable returning [(filename, bytes), ...],
+    supplied by the provider's fetch_message()."""
     saved = []
-    def walk(parts):
-        for part in parts:
-            filename = part.get("filename", "")
-            body = part.get("body", {})
-            if filename and body.get("attachmentId"):
-                att = service.users().messages().attachments().get(
-                    userId="me", messageId=msg_id, id=body["attachmentId"]
-                ).execute()
-                data = base64.urlsafe_b64decode(att["data"])
-                dest = folder / sanitize(filename)
-                dest.write_bytes(data)
-                saved.append(dest)
-            if part.get("parts"):
-                walk(part["parts"])
-    walk(payload.get("parts", [payload]))
+    for filename, data in attachments_fn():
+        dest = folder / sanitize(filename)
+        dest.write_bytes(data)
+        saved.append(dest)
     return saved
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -506,44 +413,37 @@ def create_ticktick_task(folder_name: str, folder_path: Path, account_label: str
 # PROCESS ONE EMAIL
 # ══════════════════════════════════════════════════════════════════════════
 
-def process_message(service, msg_id: str, account: dict) -> dict:
+def process_message(msg: dict, account: dict) -> dict:
     label = account["label"]
 
-    msg = service.users().messages().get(
-        userId="me", id=msg_id, format="full"
-    ).execute()
-
-    if "SENT" in msg.get("labelIds", []):
+    if msg["is_sent"]:
         return {"status": "skipped"}
 
-    headers   = {h["name"]: h["value"] for h in msg["payload"].get("headers", [])}
-    subject   = headers.get("Subject", "(no subject)")
-
+    subject = msg["subject"]
     if "פרסומת" in subject:
         return {"status": "skipped"}
-    sender    = headers.get("From", "")
-    date_str  = parse_date(headers.get("Date", ""))
-    first_att = first_attachment_name(msg["payload"])
+    sender    = msg["sender"]
+    date_str  = parse_date(msg["date_raw"])
+    first_att = msg["first_attachment_name"]
+    body_html = msg["body_html"]
 
     # ── Japanese lesson summary ───────────────────────────────────────────
-    if account["label"] == "ofek":
+    if label == "ofek":
         lesson_folder = parse_lesson_folder(subject, date_str)
         if lesson_folder:
             dest = JAPANOLOGIA_DIR / lesson_folder
             dest.mkdir(parents=True, exist_ok=True)
-            files = save_attachments(service, msg_id, msg["payload"], dest)
+            files = save_attachments(msg["attachments"], dest)
             _log_saved("JAPANOLOGIA", lesson_folder, sender, dest, files)
             return {"status": "saved", "folder_name": lesson_folder}
 
     # ── iCount special case ────────────────────────────────────────────────
     # PDF is inside a link in the email body — skip attachments (just logo),
-    # save email as PDF, create TickTick task with direct Gmail link.
+    # save email as PDF, create TickTick task with a direct link to the email.
     if is_icount(sender, subject):
-        # Extract seller from subject: "חשבונית מס קבלה 7721 מאת יפנולוגי"
         m = re.search(r"מאת\s+(.+?)$", subject)
         seller  = sanitize(m.group(1).strip()) if m else "iCount"
         product = "חשבונית מס קבלה"
-        # Check custom rules for a category/base_dir override
         custom_match = match_custom(sender, subject)
         category = custom_match[2] if custom_match else None
         root     = custom_match[3] if custom_match and custom_match[3] else RECEIPTS_DIR
@@ -551,8 +451,8 @@ def process_message(service, msg_id: str, account: dict) -> dict:
         folder_name = f"{date_str} - {seller} - {product} - {label}"
         folder      = base_dir / folder_name
         folder.mkdir(parents=True, exist_ok=True)
-        pdf = save_email_pdf(msg["payload"], folder, subject, sender, date_str)
-        create_icount_ticktick_task(folder_name, folder, label, msg_id, subject)
+        pdf = save_email_pdf(body_html, folder, subject, sender, date_str)
+        create_icount_ticktick_task(folder_name, folder, label, msg["link"], subject)
         _log_saved("ICOUNT", folder_name, sender, folder, [pdf] if pdf else [])
         return {"status": "saved", "folder_name": folder_name}
 
@@ -565,15 +465,15 @@ def process_message(service, msg_id: str, account: dict) -> dict:
         folder_name = f"{date_str} - {seller} - {product} - {label}"
         folder      = base_dir / folder_name
         folder.mkdir(parents=True, exist_ok=True)
-        files = save_attachments(service, msg_id, msg["payload"], folder)
-        pdf = save_email_pdf(msg["payload"], folder, subject, sender, date_str)
+        files = save_attachments(msg["attachments"], folder)
+        pdf = save_email_pdf(body_html, folder, subject, sender, date_str)
         if pdf:
             files.append(pdf)
         _log_saved("DOWNLOADED", folder_name, sender, folder, files)
         return {"status": "saved", "folder_name": folder_name}
 
     # ── Step 2: custom rules ───────────────────────────────────────────────
-    body   = get_body_text(msg["payload"])
+    body   = msg["body_text"]
     custom = match_custom(sender, subject, body)
     if custom:
         seller, product, category, rule_base_dir = custom
@@ -585,8 +485,8 @@ def process_message(service, msg_id: str, account: dict) -> dict:
         folder_name = f"{date_str} - {sanitize(seller)} - {sanitize(product)} - {label}"
         folder      = base_dir / folder_name
         folder.mkdir(parents=True, exist_ok=True)
-        files = save_attachments(service, msg_id, msg["payload"], folder)
-        pdf = save_email_pdf(msg["payload"], folder, subject, sender, date_str)
+        files = save_attachments(msg["attachments"], folder)
+        pdf = save_email_pdf(body_html, folder, subject, sender, date_str)
         if pdf:
             files.append(pdf)
         _log_saved("DOWNLOADED", folder_name, sender, folder, files)
@@ -598,14 +498,14 @@ def process_message(service, msg_id: str, account: dict) -> dict:
     folder_name   = f"{date_str} - {sender_name} - {subject_clean} - {label}"
     folder        = MANUAL_DIR / folder_name
     folder.mkdir(parents=True, exist_ok=True)
-    files = save_attachments(service, msg_id, msg["payload"], folder)
-    pdf = save_email_pdf(msg["payload"], folder, subject, sender, date_str)
+    files = save_attachments(msg["attachments"], folder)
+    pdf = save_email_pdf(body_html, folder, subject, sender, date_str)
     if pdf:
         files.append(pdf)
     _log_saved("FALLBACK", folder_name, sender, folder, files)
     create_ticktick_task(folder_name, folder, label)
     append_fallback_log({
-        "message_id":    msg_id,
+        "message_id":    msg["id"],
         "account":       label,
         "account_email": account["email"],
         "date":          date_str,
@@ -637,6 +537,7 @@ def main():
 
     for account in ACCOUNTS:
         label = account["label"]
+        provider = PROVIDERS[account["provider"]]
         log.info(f"── Account: {account['email']} ({label})")
 
         if not account["creds_file"].exists():
@@ -645,26 +546,23 @@ def main():
             continue
 
         try:
-            service = get_gmail_service(account)
+            service = provider.get_service(account)
         except Exception as e:
             log.error(f"  Auth failed for {label}: {e}")
             notify("⚠️ Receipt Saver", f"שגיאת כניסה לחשבון {label}")
             continue
 
-        results  = service.users().messages().list(
-            userId="me", q=build_gmail_query(), maxResults=300
-        ).execute()
-        messages = results.get("messages", [])
-        log.info(f"  Candidates: {len(messages)}")
+        candidate_ids = provider.list_candidate_ids(service, account, CUSTOM_RULES_FILE)
+        log.info(f"  Candidates: {len(candidate_ids)}")
 
-        for m in messages:
-            mid = m["id"]
+        for mid in candidate_ids:
             # Use account-scoped ID to avoid cross-account collisions
             scoped_id = f"{label}:{mid}"
             if scoped_id in processed:
                 continue
             try:
-                result = process_message(service, mid, account)
+                msg = provider.fetch_message(service, mid, account)
+                result = process_message(msg, account)
                 status = result.get("status")
                 if status == "saved":
                     saved_folders.append(result["folder_name"])
