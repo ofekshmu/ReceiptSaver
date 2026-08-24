@@ -138,6 +138,20 @@ def notify(title: str, message: str, timeout: int = 6):
 def sanitize(name: str) -> str:
     return re.sub(r'[\\/:*?"<>|]', "_", name).strip(" .")
 
+def unique_folder(base_dir: Path, folder_name: str) -> tuple:
+    """Two unrelated emails can compute the same date/seller/product/label
+    folder_name (e.g. two Hyp confirmations for the same gym visit). mkdir's
+    exist_ok=True would silently nest/overwrite into the existing folder, so
+    append a " (2)", " (3)", ... suffix instead. Returns (folder, folder_name)
+    since callers log/report folder_name and it must reflect the real path."""
+    folder = base_dir / folder_name
+    if not folder.exists():
+        return folder, folder_name
+    n = 2
+    while (base_dir / f"{folder_name} ({n})").exists():
+        n += 1
+    return base_dir / f"{folder_name} ({n})", f"{folder_name} ({n})"
+
 def extract_display_name(sender: str) -> str:
     m = re.match(r'^"?([^"<\n]+)"?\s*<', sender)
     return sanitize(m.group(1).strip()) if m else sanitize(sender.split("@")[0])
@@ -461,7 +475,7 @@ def process_message(msg: dict, account: dict) -> dict:
         root     = custom_match[3] if custom_match and custom_match[3] else RECEIPTS_DIR
         base_dir = root / category if category else root
         folder_name = f"{date_str} - {seller} - {product} - {label}"
-        folder      = base_dir / folder_name
+        folder, folder_name = unique_folder(base_dir, folder_name)
         folder.mkdir(parents=True, exist_ok=True)
         pdf = save_email_pdf(body_html, folder, subject, sender, date_str)
         create_icount_ticktick_task(folder_name, folder, label, msg["link"], subject)
@@ -475,7 +489,7 @@ def process_message(msg: dict, account: dict) -> dict:
         product     = sanitize(product_fn(subject, first_att))
         base_dir    = RECEIPTS_DIR / category if category else RECEIPTS_DIR
         folder_name = f"{date_str} - {seller} - {product} - {label}"
-        folder      = base_dir / folder_name
+        folder, folder_name = unique_folder(base_dir, folder_name)
         folder.mkdir(parents=True, exist_ok=True)
         files = save_attachments(msg["attachments"], folder)
         pdf = save_email_pdf(body_html, folder, subject, sender, date_str)
@@ -495,7 +509,7 @@ def process_message(msg: dict, account: dict) -> dict:
         root     = rule_base_dir if rule_base_dir else RECEIPTS_DIR
         base_dir = root / category if category else root
         folder_name = f"{date_str} - {sanitize(seller)} - {sanitize(product)} - {label}"
-        folder      = base_dir / folder_name
+        folder, folder_name = unique_folder(base_dir, folder_name)
         folder.mkdir(parents=True, exist_ok=True)
         files = save_attachments(msg["attachments"], folder)
         pdf = save_email_pdf(body_html, folder, subject, sender, date_str)
@@ -508,7 +522,7 @@ def process_message(msg: dict, account: dict) -> dict:
     sender_name   = extract_display_name(sender)
     subject_clean = sanitize(subject[:60])
     folder_name   = f"{date_str} - {sender_name} - {subject_clean} - {label}"
-    folder        = MANUAL_DIR / folder_name
+    folder, folder_name = unique_folder(MANUAL_DIR, folder_name)
     folder.mkdir(parents=True, exist_ok=True)
     files = save_attachments(msg["attachments"], folder)
     pdf = save_email_pdf(body_html, folder, subject, sender, date_str)

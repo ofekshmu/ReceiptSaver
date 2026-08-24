@@ -1,7 +1,9 @@
+import shutil
+import tempfile
 import unittest
 from pathlib import Path
 
-from receipt_saver import parse_date, match_custom
+from receipt_saver import parse_date, match_custom, unique_folder
 
 
 class TestParseDate(unittest.TestCase):
@@ -44,6 +46,45 @@ class TestSternumPayslipRule(unittest.TestCase):
         result = match_custom("billing@sternum-sec.com", "some subject line", body)
         seller, product, category, base_dir = result
         self.assertEqual(product, "תלוש שכר לחודש יוני 2026")
+
+
+class TestUpappRule(unittest.TestCase):
+    # hyp.co.il is a shared payment platform used by many merchants, so the
+    # rule must not match on sender domain alone — a real incident tagged an
+    # unrelated Ichilov WELL payment as the Icon gym.
+    def test_matches_genuine_upapp_receipt(self):
+        result = match_custom("noreply@hyp.co.il", "חשבונית מס / קבלה עבור תשלום ל-upapp")
+        self.assertIsNotNone(result)
+        seller, product, category, base_dir = result
+        self.assertEqual(seller, "upapp")
+        self.assertEqual(product, "כניסה לחדר כושר אייקון")
+
+    def test_does_not_match_unrelated_hyp_sender(self):
+        result = match_custom("noreply@hyp.co.il", "אישור תשלום - איכילוב WELL")
+        self.assertIsNone(result)
+
+
+class TestUniqueFolder(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+
+    def test_returns_requested_name_when_free(self):
+        folder, name = unique_folder(self.tmp, "2026_04_12 - upapp - x - yuval")
+        self.assertEqual(name, "2026_04_12 - upapp - x - yuval")
+        self.assertEqual(folder, self.tmp / name)
+
+    def test_appends_suffix_on_collision_instead_of_nesting(self):
+        (self.tmp / "2026_04_12 - upapp - x - yuval").mkdir()
+        folder, name = unique_folder(self.tmp, "2026_04_12 - upapp - x - yuval")
+        self.assertEqual(name, "2026_04_12 - upapp - x - yuval (2)")
+        self.assertEqual(folder, self.tmp / name)
+
+    def test_increments_past_multiple_collisions(self):
+        (self.tmp / "dup").mkdir()
+        (self.tmp / "dup (2)").mkdir()
+        folder, name = unique_folder(self.tmp, "dup")
+        self.assertEqual(name, "dup (3)")
 
 
 if __name__ == "__main__":

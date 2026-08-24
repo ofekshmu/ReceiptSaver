@@ -177,6 +177,13 @@ KNOWN PATH:
         └────────────────────────────┘
 ```
 
+**Folder name collisions:** if two unrelated emails compute the same
+`date - seller - product - label` (e.g. two separate Hyp payment
+confirmations for the same gym visit, on the same day), the second one gets
+a `" (2)"`, `" (3)"`, ... suffix appended (`unique_folder()` in
+`receipt_saver.py`) instead of silently nesting into the first folder or
+overwriting its `email.pdf`.
+
 ---
 
 ## Registered Senders
