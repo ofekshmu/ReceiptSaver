@@ -228,7 +228,7 @@ These were added through manual review sessions with Claude:
 | `webmaster@icmega.org` | — | — | — | — | — | **excluded** (promotional newsletters) |
 | `icmega.org` | — | חבר | הזמנה | — | — |
 | `abirsport.co.il` | — | אביר ספורט | כדור פיזיו | — | — |
-| `hyp.co.il` | — | upapp | כניסה לחדר כושר אייקון | — | — |
+| `hyp.co.il` | upapp | upapp | כניסה לחדר כושר אייקון | — | — | Hyp is a shared payment platform used by many merchants — subject must contain `upapp` or unrelated Hyp senders get mislabeled as the gym |
 | `planetcinema.co.il` | — | Planet Cinema | כרטיסים | — | — |
 | `smartbee.co.il` | — | גן ילדים דיסני ראשון | שכר לימוד | — | — |
 | `billing@sternum-sec.com` | — | משכורת | תלוש שכר (extracted from body: `תלוש שכר לחודש <month> <year>`) | — | Work\Sternum\משכורות |

@@ -141,9 +141,9 @@
     "product": "כדור פיזיו"
   },
   {
-    "_comment": "upapp — כניסה לחדר כושר אייקון (via hyp.co.il)",
+    "_comment": "upapp — כניסה לחדר כושר אייקון (hyp.co.il is a shared payment platform used by many merchants; subject must contain 'upapp' or other senders on hyp.co.il get mislabeled as the gym — see 2026_08_11 איכילוב WELL incident)",
     "match_sender_contains": "hyp.co.il",
-    "match_subject_contains": null,
+    "match_subject_contains": "upapp",
     "seller": "upapp",
     "product": "כניסה לחדר כושר אייקון"
   },
