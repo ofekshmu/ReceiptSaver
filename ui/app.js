@@ -350,6 +350,57 @@ $("#rx-open").addEventListener("click", () => {
   if (rxCurrent) api().open_path(rxCurrent);
 });
 
+let rxSearchTimer = 0;
+$("#rx-search").addEventListener("input", e => {
+  clearTimeout(rxSearchTimer);
+  const q = e.target.value.trim();
+  rxSearchTimer = setTimeout(() => (q.length >= 2 ? rxSearch(q) : rxExitSearch()), 200);
+});
+
+async function rxSearch(q) {
+  $("#view-receipts").classList.add("rx-searching");
+  const res = await api().search_receipts(q);
+  const trail = $(".rx-crumb-trail");
+  trail.innerHTML = "";
+  const label = document.createElement("span");
+  label.className = "rx-crumb here";
+  label.textContent = `Search "${q}" — ${res.results.length} result(s)` +
+    (res.truncated ? " (first 200)" : "");
+  trail.appendChild(label);
+
+  const list = $(".rx-list");
+  list.innerHTML = "";
+  const empty = $(".rx-empty");
+  if (!res.results.length) {
+    empty.hidden = false; empty.textContent = "No matches.";
+    return;
+  }
+  empty.hidden = true;
+  for (const e of res.results) {
+    const n = $("#tpl-rx-row").content.cloneNode(true);
+    const row = n.querySelector(".rx-row");
+    $(".rx-glyph", n).textContent = RX_GLYPH[e.kind] || RX_GLYPH.file;
+    $(".rx-name", n).textContent = e.name;
+    const sub = document.createElement("span");
+    sub.className = "rx-subpath";
+    sub.textContent = `${e.root_label} / ${e.rel}`;
+    $(".rx-name", n).appendChild(sub);
+    $(".rx-meta", n).textContent = "";
+    if (e.is_dir) {
+      row.classList.add("dir");
+      row.addEventListener("click", () => { $("#rx-search").value = ""; rxExitSearch(); rxBrowse(e.path); });
+    } else {
+      row.addEventListener("dblclick", () => api().open_path(e.path));
+    }
+    list.appendChild(n);
+  }
+}
+
+function rxExitSearch() {
+  $("#view-receipts").classList.remove("rx-searching");
+  if (rxCurrent) rxBrowse(rxCurrent);
+}
+
 window.addEventListener("pywebviewready", () => {
   resetRunView();
   refreshBadge();

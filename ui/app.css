@@ -173,3 +173,9 @@ main { flex: 1; overflow: hidden; position: relative; }
   margin-top: 8px;
 }
 .rx-root.hidden-root { opacity: .5; }
+
+#rx-search {
+  margin: 10px 14px 0; padding: 7px 10px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--panel-2); color: var(--text);
+}
+.rx-searching #rx-open { display: none; }
