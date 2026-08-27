@@ -118,3 +118,108 @@ def suggest(entry: dict, rules_path: Path = None) -> dict:
         "kind": kind,
         "confidence": confidence,
     }
+
+
+def _atomic_write_json(path: Path, data) -> None:
+    path = Path(path)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def compute_destination(entry: dict, decision: dict, receipts_dir: Path = None) -> Path:
+    receipts_dir = Path(receipts_dir or RECEIPTS_DIR)
+    root = Path(decision["base_dir"]) if decision.get("base_dir") else receipts_dir
+    category = decision.get("category")
+    base = root / category if category else root
+    seller  = receipt_saver.sanitize(decision["seller"])
+    product = receipt_saver.sanitize(decision["product"])
+    name = f'{entry["date"]} - {seller} - {product} - {entry["account"]}'
+    folder, _ = receipt_saver.unique_folder(base, name)
+    return folder
+
+
+def _move_folder(src: Path, dst: Path) -> Path:
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    dst.mkdir(exist_ok=True)
+    for item in Path(src).iterdir():
+        shutil.move(str(item), str(dst / item.name))
+    try:
+        Path(src).rmdir()
+    except OSError:
+        pass
+    return dst
+
+
+def _append_json_list(path: Path, item: dict) -> None:
+    try:
+        rows = json.loads(Path(path).read_text(encoding="utf-8"))
+    except Exception:
+        rows = []
+    rows.append(item)
+    _atomic_write_json(path, rows)
+
+
+def _mark_resolved(fallback_log_path: Path, message_id: str, new_path: str) -> None:
+    rows = json.loads(Path(fallback_log_path).read_text(encoding="utf-8"))
+    for r in rows:
+        if r.get("message_id") == message_id:
+            r["resolved"] = True
+            if new_path:
+                r["folder_path"] = new_path
+    _atomic_write_json(fallback_log_path, rows)
+
+
+def apply_decision(entry: dict, decision: dict, *,
+                   rules_path: Path = None, fallback_log_path: Path = None,
+                   cleanup_log_path: Path = None, history_path: Path = None,
+                   receipts_dir: Path = None, manual_dir: Path = None) -> dict:
+    rules_path        = rules_path or CUSTOM_RULES_FILE
+    fallback_log_path = fallback_log_path or FALLBACK_LOG_FILE
+    cleanup_log_path  = cleanup_log_path or CLEANUP_LOG_FILE
+    receipts_dir      = Path(receipts_dir or RECEIPTS_DIR)
+    src = Path(entry["folder_path"])
+    rec_id = f'{entry["account"]}:{entry["message_id"]}'
+    kind = decision.get("kind")
+
+    if kind == "skip":
+        return {"ok": True, "kind": "skip"}
+
+    if kind == "exclude":
+        rule = {"_comment": f'auto-added from fallback {entry["message_id"]}',
+                "match_sender_contains": decision["match_sender_contains"],
+                "match_subject_contains": decision.get("match_subject_contains"),
+                "exclude": True}
+        _append_json_list(rules_path, rule)
+        if src.exists():
+            shutil.rmtree(src, ignore_errors=True)
+        import datetime as _dt
+        _append_json_list(cleanup_log_path, {
+            "action": "DELETED", "folder": entry["folder_name"],
+            "reason": f'excluded via fallback UI ({decision["match_sender_contains"]})',
+            "timestamp": _dt.datetime.now().isoformat()})
+        _mark_resolved(fallback_log_path, entry["message_id"], "")
+        history.update(rec_id, {"action": "RESOLVED", "resolution": "exclude"},
+                       path=history_path)
+        return {"ok": True, "kind": "exclude"}
+
+    # kind in ("rule", "once")
+    dst = compute_destination(entry, decision, receipts_dir)
+    if kind == "rule":
+        rule = {"_comment": f'auto-added from fallback {entry["message_id"]}',
+                "match_sender_contains": decision["match_sender_contains"],
+                "match_subject_contains": decision.get("match_subject_contains"),
+                "seller": decision["seller"], "product": decision["product"],
+                "category": decision.get("category")}
+        if decision.get("base_dir"):
+            rule["base_dir"] = decision["base_dir"]
+        _append_json_list(rules_path, rule)
+    moved = _move_folder(src, dst) if src.exists() else dst
+    _mark_resolved(fallback_log_path, entry["message_id"], str(moved))
+    history.update(rec_id, {
+        "action": "RESOLVED", "resolution": kind,
+        "seller": decision["seller"], "product": decision["product"],
+        "category": decision.get("category"),
+        "folder_name": moved.name, "folder_path": str(moved),
+    }, path=history_path)
+    return {"ok": True, "kind": kind, "dest": str(moved)}
