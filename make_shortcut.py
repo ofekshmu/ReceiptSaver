@@ -1,27 +1,69 @@
 """
 make_shortcut.py
 ----------------
-One-off: drop a "Receipt Saver" shortcut into the Start Menu that launches
-run.bat. Run manually once:  python make_shortcut.py
+Create clickable "Receipt Saver" shortcuts (Desktop + Start Menu) that launch
+the app via run.bat, using assets/receipt_saver.ico.
+
+Run once:  python make_shortcut.py
+Add  --startmenu-only  to skip the Desktop shortcut.
 """
 
 import os
+import sys
+import subprocess
 from pathlib import Path
 
-RUN_BAT = Path(__file__).with_name("run.bat")
+HERE     = Path(__file__).parent
+APP_PY   = HERE / "app.py"
+ICON     = HERE / "assets" / "receipt_saver.ico"
+
+# Launch pythonw.exe directly (no console flash) rather than via run.bat.
+PYTHONW  = Path(sys.executable).with_name("pythonw.exe")
+if not PYTHONW.exists():
+    PYTHONW = Path(sys.executable)
+
+DESKTOP    = Path(os.environ["USERPROFILE"]) / "Desktop"
 START_MENU = Path(os.environ["APPDATA"]) / r"Microsoft\Windows\Start Menu\Programs"
-LNK = START_MENU / "Receipt Saver.lnk"
+
+
+def _ensure_icon():
+    if not ICON.exists():
+        subprocess.run([sys.executable, str(HERE / "make_icon.py")], check=True)
+
+
+def _create(lnk: Path):
+    lnk.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        import win32com.client
+        shell = win32com.client.Dispatch("WScript.Shell")
+        sc = shell.CreateShortcut(str(lnk))
+        sc.TargetPath = str(PYTHONW)
+        sc.Arguments = f'"{APP_PY}"'
+        sc.WorkingDirectory = str(HERE)
+        sc.IconLocation = f"{ICON},0"
+        sc.Description = "Receipt Saver"
+        sc.Save()
+    except ImportError:
+        # Fallback: drive WScript.Shell through PowerShell (no pywin32 needed).
+        ps = (
+            f"$w=New-Object -ComObject WScript.Shell;"
+            f"$s=$w.CreateShortcut('{lnk}');"
+            f"$s.TargetPath='{PYTHONW}';"
+            f"$s.Arguments='\"{APP_PY}\"';"
+            f"$s.WorkingDirectory='{HERE}';"
+            f"$s.IconLocation='{ICON},0';"
+            f"$s.Description='Receipt Saver';"
+            f"$s.Save()"
+        )
+        subprocess.run(["powershell", "-NoProfile", "-Command", ps], check=True)
+    print(f"Created {lnk}")
 
 
 def main():
-    import win32com.client  # from pywin32; install if missing
-    shell = win32com.client.Dispatch("WScript.Shell")
-    sc = shell.CreateShortcut(str(LNK))
-    sc.TargetPath = str(RUN_BAT)
-    sc.WorkingDirectory = str(RUN_BAT.parent)
-    sc.IconLocation = "shell32.dll,297"
-    sc.Save()
-    print(f"Created {LNK}")
+    _ensure_icon()
+    _create(START_MENU / "Receipt Saver.lnk")
+    if "--startmenu-only" not in sys.argv:
+        _create(DESKTOP / "Receipt Saver.lnk")
 
 
 if __name__ == "__main__":

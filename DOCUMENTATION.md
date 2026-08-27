@@ -79,7 +79,9 @@ YYYY_MM_DD - Seller Name - Product Description - [account]
 | `claude_handoff.py` | Opens a pre-seeded `claude` terminal for fallbacks that need manual classification |
 | `tray.py` | Resident system-tray icon (Open / Run scan now / Quit) |
 | `ui/` | Frontend for `app.py` — `index.html`, `app.css`, `app.js`. No build step |
-| `make_shortcut.py` | One-off: creates a Start Menu shortcut to `run.bat` |
+| `make_shortcut.py` | One-off: creates Desktop + Start Menu shortcuts that launch `pythonw app.py` with the app icon (`python make_shortcut.py`) |
+| `make_icon.py` | One-off: generates `assets/receipt_saver.ico` |
+| `assets/receipt_saver.ico` | App icon (7 sizes, 16–256 px) used by the shortcuts |
 | `history.json` | Structured log of every handled mail since the UI shipped |
 | `requirements.txt` | Pinned dependency list |
 | `gmail_provider.py` | Gmail-specific implementation of the provider interface (`get_service`, `list_candidate_ids`, `fetch_message`) — houses `build_gmail_query()` and the Gmail payload parsing that used to live in `receipt_saver.py` |
@@ -312,8 +314,12 @@ opens, shows a scanning state, and drives the scan itself on a worker thread.
 - `skip` — nothing; the row stays for next time.
 
 **Tray:** a resident tray icon (Open / Run scan now / Quit). Closing the window
-hides it to the tray; Quit ends the process. `make_shortcut.py` adds a Start Menu
-shortcut to `run.bat` (run once, needs `pywin32`).
+hides it to the tray; Quit ends the process.
+
+**Clickable icon:** run `python make_shortcut.py` once to drop **Receipt Saver**
+shortcuts on the Desktop and in the Start Menu. They launch `pythonw app.py`
+directly (no console flash) with `assets/receipt_saver.ico`. Regenerate the icon
+with `python make_icon.py`. `--startmenu-only` skips the Desktop shortcut.
 
 **`history.json` record shape:** `id` (`account:messageId`), `run_id`,
 `handled_at`, `account`, `account_email`, `date`, `sender`, `subject`, `action`
