@@ -83,5 +83,69 @@ class TestApi(unittest.TestCase):
             time.sleep(0.05)
 
 
+class TestExplorerApi(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.root = self.tmp / "קבלות"
+        (self.root / "חשבנות").mkdir(parents=True)
+        (self.root / "2026_08_25 - סלקום - חשבונית - ofek").mkdir()
+        (self.root / "2026_01_02 - Wolt - x - family").mkdir()
+        (self.root / "note.pdf").write_bytes(b"x" * 2048)
+        (self.root / "aaa.txt").write_text("hi", encoding="utf-8")
+        self._roots = [{"label": "קבלות", "path": str(self.root)}]
+
+    def _api(self):
+        import receipt_roots
+        a = appmod.Api(scan_fn=lambda run_id, progress_cb: {
+            "run_id": run_id, "saved": 0, "fallback": 0, "excluded": 0, "records": []})
+        self._orig = receipt_roots.discover_roots
+        receipt_roots.discover_roots = lambda rules_path=None: self._roots
+        self.addCleanup(setattr, receipt_roots, "discover_roots", self._orig)
+        return a
+
+    def test_list_roots_shape(self):
+        r = self._api().list_roots()
+        self.assertEqual(r[0]["label"], "קבלות")
+        self.assertTrue(r[0]["exists"])
+        self.assertIn("path", r[0])
+
+    def test_browse_sorts_dirs_first_dated_desc_then_files(self):
+        entries = self._api().browse(str(self.root))["entries"]
+        names = [e["name"] for e in entries]
+        self.assertEqual(names, [
+            "2026_08_25 - סלקום - חשבונית - ofek",
+            "2026_01_02 - Wolt - x - family",
+            "חשבנות",
+            "aaa.txt",
+            "note.pdf",
+        ])
+
+    def test_browse_marks_kinds_and_size(self):
+        by = {e["name"]: e for e in self._api().browse(str(self.root))["entries"]}
+        self.assertEqual(by["2026_08_25 - סלקום - חשבונית - ofek"]["kind"], "receipt-folder")
+        self.assertEqual(by["חשבנות"]["kind"], "folder")
+        self.assertEqual(by["note.pdf"]["kind"], "pdf")
+        self.assertEqual(by["aaa.txt"]["kind"], "file")
+        self.assertEqual(by["note.pdf"]["size"], 2048)
+        self.assertIsNone(by["חשבנות"]["size"])
+
+    def test_browse_crumbs(self):
+        res = self._api().browse(str(self.root / "חשבנות"))
+        self.assertEqual([c["name"] for c in res["crumbs"]], ["קבלות", "חשבנות"])
+        self.assertEqual(res["crumbs"][-1]["path"], str(self.root / "חשבנות"))
+        self.assertEqual(res["label"], "קבלות")
+
+    def test_browse_rejects_path_outside_roots(self):
+        res = self._api().browse(str(self.tmp / "elsewhere"))
+        self.assertIn("error", res)
+        self.assertEqual(res.get("entries", []), [])
+
+    def test_browse_missing_folder_under_root(self):
+        res = self._api().browse(str(self.root / "nope"))
+        self.assertEqual(res["error"], "folder not found")
+        self.assertEqual(res["entries"], [])
+        self.assertEqual([c["name"] for c in res["crumbs"]], ["קבלות", "nope"])
+
+
 if __name__ == "__main__":
     unittest.main()

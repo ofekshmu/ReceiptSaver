@@ -10,6 +10,7 @@ Run:  pythonw app.py
 
 import json
 import os
+import re
 import threading
 import datetime
 from pathlib import Path
@@ -18,10 +19,22 @@ import receipt_saver
 import history
 import fallback_ops
 import claude_handoff
+import receipt_roots
 
 SCRIPT_DIR        = Path(r"C:\Users\ofeks\Scripts\ReceiptSaver")
 UI_DIR            = SCRIPT_DIR / "ui"
 FALLBACK_LOG_FILE = SCRIPT_DIR / "fallback_log.json"
+
+_DATED_RE = re.compile(r"^(\d{4})_(\d{2})_(\d{2})")
+
+
+def _entry_sort_key(e: dict):
+    # dirs before files; dated dirs by date desc; then name (case-insensitive)
+    is_file = 0 if e["is_dir"] else 1
+    m = _DATED_RE.match(e["name"]) if e["is_dir"] else None
+    dated = 0 if m else 1
+    date_key = (-int(m.group(1) + m.group(2) + m.group(3))) if m else 0
+    return (is_file, dated, date_key, e["name"].lower())
 
 
 class Api:
@@ -132,8 +145,82 @@ class Api:
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
+    def open_path(self, path: str) -> dict:
+        return self.open_folder(path)
+
     def categories(self) -> list:
         return fallback_ops.CATEGORIES
+
+    # -- receipts explorer (read-only) --------------------------------------
+    def list_roots(self) -> list:
+        return [{**r, "exists": os.path.isdir(r["path"])}
+                for r in receipt_roots.discover_roots()]
+
+    def _root_for(self, p: Path):
+        best = None
+        for r in receipt_roots.discover_roots():
+            rp = Path(r["path"])
+            try:
+                p.relative_to(rp)
+            except ValueError:
+                continue
+            if best is None or len(str(rp)) > len(str(Path(best["path"]))):
+                best = r
+        return best
+
+    def _crumbs(self, p: Path) -> list:
+        root = self._root_for(p)
+        if not root:
+            return [{"name": p.name or str(p), "path": str(p)}]
+        rp = Path(root["path"])
+        crumbs = [{"name": root["label"], "path": str(rp)}]
+        acc = rp
+        for part in p.relative_to(rp).parts:
+            acc = acc / part
+            crumbs.append({"name": part, "path": str(acc)})
+        return crumbs
+
+    def _entry(self, child: Path) -> dict:
+        try:
+            is_dir = child.is_dir()
+        except OSError:
+            is_dir = False
+        name = child.name
+        if is_dir:
+            kind = "receipt-folder" if _DATED_RE.match(name) else "folder"
+        elif name.lower().endswith(".pdf"):
+            kind = "pdf"
+        else:
+            kind = "file"
+        size = mtime = None
+        try:
+            st = child.stat()
+            mtime = st.st_mtime
+            if not is_dir:
+                size = st.st_size
+        except OSError:
+            pass
+        return {"name": name, "path": str(child), "is_dir": is_dir,
+                "kind": kind, "size": size, "mtime": mtime}
+
+    def browse(self, path: str) -> dict:
+        if not receipt_roots.is_within_roots(path):
+            return {"error": "path is outside the known receipt roots",
+                    "path": path, "crumbs": [], "entries": []}
+        p = Path(path)
+        crumbs = self._crumbs(p)
+        root = self._root_for(p)
+        label = root["label"] if root else (p.name or str(p))
+        if not p.is_dir():
+            return {"error": "folder not found", "path": str(p),
+                    "label": label, "crumbs": crumbs, "entries": []}
+        try:
+            entries = [self._entry(c) for c in p.iterdir()]
+        except OSError as e:
+            return {"error": str(e), "path": str(p),
+                    "label": label, "crumbs": crumbs, "entries": []}
+        entries.sort(key=_entry_sort_key)
+        return {"path": str(p), "label": label, "crumbs": crumbs, "entries": entries}
 
     def move_window(self, x, y):
         """Absolute-position the frameless window. The page computes (x, y) from
