@@ -72,10 +72,23 @@ YYYY_MM_DD - Seller Name - Product Description - [account]
 
 | File | Purpose |
 |------|---------|
-| `receipt_saver.py` | Main script — runs at every login. Provider-agnostic: dispatches each account to `gmail_provider` or `outlook_provider` based on its `"provider"` field, then processes a normalized message dict |
+| `receipt_saver.py` | Scan engine. Provider-agnostic: dispatches each account to `gmail_provider` or `outlook_provider` based on its `"provider"` field, then processes a normalized message dict. `main(run_id, progress_cb)` accepts an optional progress callback and returns a run summary; `process_message()` returns a structured record per handled mail. Still runs standalone (`python receipt_saver.py`); at login it is driven by `app.py` instead |
+| `app.py` | Startup window (pywebview). Opens at login, drives the scan on a worker thread, streams results into the UI, serves history + fallback data, applies fallback decisions. Launched by `run.bat`. `RECEIPT_SAVER_UI_DRYRUN=1` boots the window without touching any mailbox |
+| `history.py` | Append-only `history.json` store — one record per handled mail, backs the History view |
+| `fallback_ops.py` | Heuristic `suggest()` for unresolved fallbacks + `apply_decision()` (rule / once / exclude / skip): writes `custom_rules.json`, moves the folder out of `_לטיפול ידני`, marks `fallback_log.json` resolved, patches the history row |
+| `claude_handoff.py` | Opens a pre-seeded `claude` terminal for fallbacks that need manual classification |
+| `tray.py` | Resident system-tray icon (Open / Run scan now / Quit) |
+| `ui/` | Frontend for `app.py` — `index.html`, `app.css`, `app.js`. No build step |
+| `make_shortcut.py` | One-off: creates a Start Menu shortcut to `run.bat` |
+| `history.json` | Structured log of every handled mail since the UI shipped |
+| `requirements.txt` | Pinned dependency list |
 | `gmail_provider.py` | Gmail-specific implementation of the provider interface (`get_service`, `list_candidate_ids`, `fetch_message`) — houses `build_gmail_query()` and the Gmail payload parsing that used to live in `receipt_saver.py` |
 | `outlook_provider.py` | Microsoft 365 provider implementation (`get_service`, `list_candidate_ids`, `fetch_message` via Microsoft Graph + MSAL device-code auth) — not yet wired to a live Outlook account in `ACCOUNTS` |
-| `test_receipt_saver.py` | Unit tests for `parse_date()` (RFC 2822 and ISO 8601 timestamp formats) |
+| `test_receipt_saver.py` | Unit tests for `parse_date()`, the structured record shape, and `main()`'s progress callback |
+| `test_history.py` | Unit tests for `history.py` (append/dedup/update/page) |
+| `test_fallback_ops.py` | Unit tests for `suggest()` and `apply_decision()` |
+| `test_claude_handoff.py` | Unit tests for the Claude handoff prompt builder |
+| `test_app_api.py` | Unit tests for the `app.Api` data methods and scan orchestration |
 | `japanologia_backfill.py` | One-time script — backfills Japanese lesson attachments since April 15, 2026 |
 | `custom_rules.json` | User-defined sender rules — grows over time |
 | `fallback_log.json` | Log of all unrecognized emails |
@@ -89,7 +102,7 @@ YYYY_MM_DD - Seller Name - Product Description - [account]
 | `token_yuval.json` | Auto-refreshing Gmail access token for yuval |
 | `ticktick_token.json` | TickTick API access token |
 | `ticktick_auth.py` | One-time TickTick authorization script |
-| `run.bat` | Runs the script — shortcut placed in Windows startup folder |
+| `run.bat` | Launches `pythonw app.py` (the startup window, which runs the scan). Shortcut placed in Windows startup folder |
 | `setup.bat` | One-time installer — registers Task Scheduler job (replaced by run.bat) |
 
 ---
@@ -273,6 +286,44 @@ The script shows three types of Windows toast notifications:
 
 ---
 
+## Startup UI (`app.py`)
+
+At login `run.bat` launches `pythonw app.py` — a borderless, centered window
+(pywebview). It replaces the old headless `python receipt_saver.py` startup run;
+`receipt_saver.py` still runs standalone for manual/scheduled use. The window
+opens, shows a scanning state, and drives the scan itself on a worker thread.
+
+**Three views:**
+
+| View | What it shows |
+|------|---------------|
+| **This run** | Live results of the scan that runs when the window opens: a card per handled mail (action pill, `seller · product` or `sender · subject`, account, date, Open folder), per-account progress lines, and a `N saved · M fallback` summary. |
+| **History** | Every mail handled since the UI shipped, newest first, lazy-loaded on scroll, with a text filter over sender/subject/seller. Backed by `history.json`. |
+| **Fallbacks** | Unresolved `fallback_log.json` entries (badge shows the count). Each row has a form pre-filled by a heuristic guess (`fallback_ops.suggest`, sender + subject only — no body, no network, no AI). Pick **Make a rule** / **Move this one only** / **Exclude as promotional** / **Skip**, adjust fields, **Apply**. Multi-select + **Handle selected with Claude →** opens a pre-seeded `claude` terminal for the hard ones. |
+
+**Applying a fallback decision** (`fallback_ops.apply_decision`):
+
+- `rule` — append a rule to `custom_rules.json`, move + rename the folder from
+  `_לטיפול ידני` to the computed destination, mark resolved, set the history row
+  to `RESOLVED`.
+- `once` — same, minus the `custom_rules.json` write.
+- `exclude` — append an `{"exclude": true}` rule, delete the folder, log to
+  `cleanup_log.json`, mark resolved.
+- `skip` — nothing; the row stays for next time.
+
+**Tray:** a resident tray icon (Open / Run scan now / Quit). Closing the window
+hides it to the tray; Quit ends the process. `make_shortcut.py` adds a Start Menu
+shortcut to `run.bat` (run once, needs `pywin32`).
+
+**`history.json` record shape:** `id` (`account:messageId`), `run_id`,
+`handled_at`, `account`, `account_email`, `date`, `sender`, `subject`, `action`
+(`DOWNLOADED | ICOUNT | JAPANOLOGIA | FALLBACK | EXCLUDED | RESOLVED`), `seller`,
+`product`, `category`, `folder_name`, `folder_path`, `files`, `rule_source`
+(`hardcoded | custom | icount | japanologia | null`). Resolved fallbacks also get
+`resolution` (`rule | once | exclude`).
+
+---
+
 ## Gmail Search Query
 
 The script builds the Gmail query dynamically at runtime:
@@ -440,8 +491,13 @@ Entries are marked `"resolved": true` after being handled in a Claude session.
 | `requests` | TickTick API calls |
 | `plyer` | Windows desktop toast notifications |
 | `weasyprint` | HTML → PDF conversion for email printouts |
+| `msal` | Microsoft 365 device-code auth (Outlook provider) |
+| `pywebview` | Frameless startup window hosting the HTML/CSS/JS UI |
+| `pystray` | System-tray icon |
+| `Pillow` | Tray icon image generation |
+| `pywin32` *(optional)* | Only needed by `make_shortcut.py` |
 
-Install all: `pip install google-auth google-auth-oauthlib google-auth-httplib2 google-api-python-client requests plyer weasyprint`
+Install all: `pip install -r requirements.txt`
 
 ---
 
@@ -449,7 +505,9 @@ Install all: `pip install google-auth google-auth-oauthlib google-auth-httplib2 
 
 | Problem | Solution |
 |---------|----------|
-| Script not running at startup | Check startup folder (`shell:startup`) — `run.bat` shortcut should be there |
+| Window not appearing at startup | Check startup folder (`shell:startup`) — `run.bat` shortcut should be there |
+| Startup window is blank | Check `receipt_saver.log` for an `[app.py]` line; run `python app.py` (not `pythonw`) once to see console errors |
+| Want to open the window without scanning | `set RECEIPT_SAVER_UI_DRYRUN=1` then run `app.py` |
 | Gmail auth error | Delete `token_[account].json` and run `receipt_saver.py` manually to re-authorize |
 | TickTick tasks not created | Check `ticktick_token.json` exists; re-run `ticktick_auth.py` if needed |
 | No notifications | Run `pip install plyer` |
