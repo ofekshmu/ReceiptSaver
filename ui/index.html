@@ -13,6 +13,7 @@
       <button data-view="run" class="tab active">This run</button>
       <button data-view="history" class="tab">History</button>
       <button data-view="fallbacks" class="tab">Fallbacks <span id="fb-badge" class="badge" hidden>0</span></button>
+      <button data-view="receipts" class="tab">Receipts</button>
     </nav>
     <div class="win-controls">
       <button id="btn-rescan" title="Run scan now">&#10227;</button>
@@ -42,6 +43,18 @@
       </div>
       <div id="fb-list" class="cards"></div>
       <div id="fb-empty" class="empty" hidden>No unresolved fallbacks. &#127881;</div>
+    </section>
+
+    <section id="view-receipts" class="view">
+      <div class="rx-nav"></div>
+      <div class="rx-main">
+        <div class="rx-crumbs">
+          <div class="rx-crumb-trail"></div>
+          <button id="rx-open" title="Open this folder in Windows Explorer">Open in Explorer</button>
+        </div>
+        <div class="rx-list"></div>
+        <div class="rx-empty" hidden></div>
+      </div>
     </section>
   </main>
 
@@ -137,6 +150,20 @@
         </form>
       </div>
     </article>
+  </template>
+
+  <template id="tpl-rx-root">
+    <button class="rx-root">
+      <span class="rx-root-label" dir="auto"></span>
+    </button>
+  </template>
+
+  <template id="tpl-rx-row">
+    <div class="rx-row" tabindex="0">
+      <span class="rx-glyph"></span>
+      <span class="rx-name" dir="auto"></span>
+      <span class="rx-meta"></span>
+    </div>
   </template>
 
   <script src="app.js"></script>
