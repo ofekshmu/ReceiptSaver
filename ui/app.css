@@ -12,6 +12,7 @@ body { display: flex; flex-direction: column; font-size: 14px; }
   display: flex; align-items: center; gap: 16px;
   padding: 10px 14px; background: var(--panel); border-bottom: 1px solid var(--line);
   -webkit-user-select: none; user-select: none;
+  cursor: default; touch-action: none;
 }
 .brand { font-weight: 600; letter-spacing: .3px; }
 .tabs { display: flex; gap: 4px; }
@@ -74,8 +75,21 @@ main { flex: 1; overflow: hidden; position: relative; }
 #fb-handoff:disabled { background: var(--panel-2); color: var(--muted); cursor: default; }
 .card.fb { align-items: flex-start; flex-direction: row; }
 .fb-form { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
-.fb-form label { color: var(--muted); font-size: 13px; }
-.fb-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 6px 0; }
+
+.fb-kinds {
+  border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
+  margin: 4px 0 10px; display: flex; flex-direction: column; gap: 9px;
+}
+.fb-kinds legend { color: var(--muted); font-size: 12px; padding: 0 4px; }
+.opt { display: flex; flex-direction: column; gap: 2px; cursor: pointer; }
+.opt-head { display: flex; align-items: baseline; gap: 8px; color: var(--text); font-size: 13px; font-weight: 500; }
+.opt-head input { flex: none; }
+.opt-desc { color: var(--muted); font-size: 12px; line-height: 1.4; margin-inline-start: 22px; }
+
+.fb-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; margin: 6px 0; }
+.field { display: flex; flex-direction: column; gap: 3px; }
+.field > label { color: var(--text); font-size: 12px; font-weight: 500; }
+.field .hint { color: var(--muted); font-size: 11px; line-height: 1.35; }
 .fb-fields input, .fb-fields select {
   padding: 6px 8px; border-radius: 6px; border: 1px solid var(--line);
   background: var(--panel-2); color: var(--text);

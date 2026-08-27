@@ -135,6 +135,16 @@ class Api:
     def categories(self) -> list:
         return fallback_ops.CATEGORIES
 
+    def move_window(self, x, y):
+        """Absolute-position the frameless window. The page computes (x, y) from
+        the pointer's screen position minus the grab offset, so there is no
+        drift between where the user grabbed and where the window lands."""
+        if self._window:
+            try:
+                self._window.move(int(x), int(y))
+            except Exception:
+                pass
+
     def minimize(self):
         if self._window:
             self._window.minimize()
@@ -167,7 +177,7 @@ def main():
         url=str(UI_DIR / "index.html"),
         js_api=api,
         width=980, height=680,
-        frameless=True, easy_drag=True,
+        frameless=True, easy_drag=False,
         background_color="#0f1115",
     )
     api.bind(window)

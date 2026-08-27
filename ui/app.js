@@ -17,6 +17,36 @@ $$(".tab").forEach(t => t.addEventListener("click", () => {
   if (t.dataset.view === "fallbacks") loadFallbacks();
 }));
 
+// ---- window dragging ---------------------------------------------------
+// easy_drag drifts; instead track the cursor's grab offset within the window
+// and set the absolute window position to (screenPos - grabOffset).
+(function enableDrag() {
+  const bar = $(".titlebar");
+  let dragging = false, grabX = 0, grabY = 0, pending = null, raf = 0;
+  const flush = () => {
+    raf = 0;
+    if (pending) { api().move_window(pending[0], pending[1]); pending = null; }
+  };
+  bar.addEventListener("pointerdown", e => {
+    if (e.button !== 0 || e.target.closest("button, .tab")) return;
+    dragging = true;
+    grabX = e.clientX;
+    grabY = e.clientY;
+    try { bar.setPointerCapture(e.pointerId); } catch (_) {}
+  });
+  bar.addEventListener("pointermove", e => {
+    if (!dragging) return;
+    pending = [Math.round(e.screenX - grabX), Math.round(e.screenY - grabY)];
+    if (!raf) raf = requestAnimationFrame(flush);
+  });
+  const end = e => {
+    dragging = false;
+    try { bar.releasePointerCapture(e.pointerId); } catch (_) {}
+  };
+  bar.addEventListener("pointerup", end);
+  bar.addEventListener("pointercancel", end);
+})();
+
 $("#btn-min").addEventListener("click", () => api().minimize());
 $("#btn-close").addEventListener("click", () => api().hide());
 $("#btn-rescan").addEventListener("click", async () => {
