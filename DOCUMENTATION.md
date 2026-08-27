@@ -76,6 +76,7 @@ YYYY_MM_DD - Seller Name - Product Description - [account]
 | `app.py` | Startup window (pywebview). Opens at login, drives the scan on a worker thread, streams results into the UI, serves history + fallback data, applies fallback decisions. Launched by `run.bat`. `RECEIPT_SAVER_UI_DRYRUN=1` boots the window without touching any mailbox |
 | `history.py` | Append-only `history.json` store — one record per handled mail, backs the History view |
 | `fallback_ops.py` | Heuristic `suggest()` for unresolved fallbacks + `apply_decision()` (rule / once / exclude / skip): writes `custom_rules.json`, moves the folder out of `_לטיפול ידני`, marks `fallback_log.json` resolved, patches the history row |
+| `receipt_roots.py` | Discovers every destination root (main `קבלות`, the fallback dir, Japanologia, and each `base_dir` in `custom_rules.json`) and guards `Api.browse` against filesystem access outside them. Backs the Receipts tab |
 | `claude_handoff.py` | Opens a pre-seeded `claude` terminal for fallbacks that need manual classification |
 | `tray.py` | Resident system-tray icon (Open / Run scan now / Quit) |
 | `ui/` | Frontend for `app.py` — `index.html`, `app.css`, `app.js`. No build step |
@@ -295,13 +296,14 @@ At login `run.bat` launches `pythonw app.py` — a borderless, centered window
 `receipt_saver.py` still runs standalone for manual/scheduled use. The window
 opens, shows a scanning state, and drives the scan itself on a worker thread.
 
-**Three views:**
+**Four views:**
 
 | View | What it shows |
 |------|---------------|
 | **This run** | Live results of the scan that runs when the window opens: a card per handled mail (action pill, `seller · product` or `sender · subject`, account, date, Open folder), per-account progress lines, and a `N saved · M fallback` summary. |
 | **History** | Every mail handled since the UI shipped, newest first, lazy-loaded on scroll, with a text filter over sender/subject/seller. Backed by `history.json`. |
 | **Fallbacks** | Unresolved `fallback_log.json` entries (badge shows the count). Each row has a form pre-filled by a heuristic guess (`fallback_ops.suggest`, sender + subject only — no body, no network, no AI). Pick **Make a rule** / **Move this one only** / **Exclude as promotional** / **Skip**, adjust fields, **Apply**. Multi-select + **Handle selected with Claude →** opens a pre-seeded `claude` terminal for the hard ones. |
+| **Receipts** | Read-only explorer. Left rail lists every destination root (`receipt_roots.discover_roots` — main `קבלות`, `_לטיפול ידני`, Japanologia, and each custom-rule `base_dir`; roots not yet created are dimmed). The right pane is a breadcrumb navigator over the selected root: click a folder to descend, a crumb to go back, double-click a file to open it in its default app, or **Open in Explorer** for the current folder. Dated `YYYY_MM_DD - …` folders sort newest-first with a 🧾 glyph. No writes — `Api.browse` refuses any path outside the known roots. |
 
 **Applying a fallback decision** (`fallback_ops.apply_decision`):
 
