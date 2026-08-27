@@ -32,6 +32,7 @@ import requests
 
 import gmail_provider
 import outlook_provider
+import history
 
 try:
     from plyer import notification as _plyer_notification
@@ -236,6 +237,28 @@ def _log_saved(action: str, folder_name: str, sender: str, folder: Path, files: 
         lines.append(f"           FILE  {f}")
     log.info("\n".join(lines))
 
+def _make_record(msg, account, run_id, action, folder, folder_name, files,
+                 seller=None, product=None, category=None, rule_source=None):
+    return {
+        "id":            f'{account["label"]}:{msg["id"]}',
+        "run_id":        run_id,
+        "handled_at":    datetime.datetime.now().isoformat(timespec="seconds"),
+        "account":       account["label"],
+        "account_email": account.get("email", ""),
+        "date":          parse_date(msg["date_raw"]),
+        "sender":        msg["sender"],
+        "subject":       msg["subject"],
+        "action":        action,
+        "seller":        seller,
+        "product":       product,
+        "category":      category,
+        "folder_name":   folder_name,
+        "folder_path":   str(folder) if folder else None,
+        "files":         [f.name for f in files] if files else [],
+        "rule_source":   rule_source,
+    }
+
+
 def match_hardcoded(sender: str, subject: str):
     for match_fn, seller_val, product_fn, category in KNOWN_RULES:
         if match_fn(sender, subject):
@@ -439,7 +462,7 @@ def create_ticktick_task(folder_name: str, folder_path: Path, account_label: str
 # PROCESS ONE EMAIL
 # ══════════════════════════════════════════════════════════════════════════
 
-def process_message(msg: dict, account: dict) -> dict:
+def process_message(msg: dict, account: dict, run_id: str = "") -> dict:
     label = account["label"]
 
     if msg["is_sent"]:
@@ -448,10 +471,10 @@ def process_message(msg: dict, account: dict) -> dict:
     subject = msg["subject"]
     if "פרסומת" in subject:
         return {"status": "skipped"}
-    sender    = msg["sender"]
-    date_str  = parse_date(msg["date_raw"])
-    first_att = msg["first_attachment_name"]
-    body_html = msg["body_html"]
+    sender     = msg["sender"]
+    date_str   = parse_date(msg["date_raw"])
+    first_att  = msg["first_attachment_name"]
+    body_html  = msg["body_html"]
 
     # ── Japanese lesson summary ───────────────────────────────────────────
     if label == "ofek":
@@ -461,9 +484,12 @@ def process_message(msg: dict, account: dict) -> dict:
             dest.mkdir(parents=True, exist_ok=True)
             files = save_attachments(msg["attachments"], dest)
             _log_saved("JAPANOLOGIA", lesson_folder, sender, dest, files)
-            return {"status": "saved", "folder_name": lesson_folder}
+            rec = _make_record(msg, account, run_id, "JAPANOLOGIA", dest,
+                               lesson_folder, files, seller="יפנולוגי",
+                               product="סיכום שיעור", rule_source="japanologia")
+            return {"status": "saved", "record": rec}
 
-    # ── iCount special case ────────────────────────────────────────────────
+    # ── iCount special case ──────────────────────────────────────────────
     # PDF is inside a link in the email body — skip attachments (just logo),
     # save email as PDF, create TickTick task with a direct link to the email.
     if is_icount(sender, subject):
@@ -479,10 +505,14 @@ def process_message(msg: dict, account: dict) -> dict:
         folder.mkdir(parents=True, exist_ok=True)
         pdf = save_email_pdf(body_html, folder, subject, sender, date_str)
         create_icount_ticktick_task(folder_name, folder, label, msg["link"], subject)
-        _log_saved("ICOUNT", folder_name, sender, folder, [pdf] if pdf else [])
-        return {"status": "saved", "folder_name": folder_name}
+        files = [pdf] if pdf else []
+        _log_saved("ICOUNT", folder_name, sender, folder, files)
+        rec = _make_record(msg, account, run_id, "ICOUNT", folder, folder_name,
+                           files, seller=seller, product=product,
+                           category=category, rule_source="icount")
+        return {"status": "saved", "record": rec}
 
-    # ── Step 1: hardcoded rules ────────────────────────────────────────────
+    # ── Step 1: hardcoded rules ─────────────────────────────────────────
     rule = match_hardcoded(sender, subject)
     if rule:
         seller, product_fn, category = rule
@@ -496,16 +526,21 @@ def process_message(msg: dict, account: dict) -> dict:
         if pdf:
             files.append(pdf)
         _log_saved("DOWNLOADED", folder_name, sender, folder, files)
-        return {"status": "saved", "folder_name": folder_name}
+        rec = _make_record(msg, account, run_id, "DOWNLOADED", folder, folder_name,
+                           files, seller=seller, product=product,
+                           category=category, rule_source="hardcoded")
+        return {"status": "saved", "record": rec}
 
-    # ── Step 2: custom rules ───────────────────────────────────────────────
+    # ── Step 2: custom rules ───────────────────────────────────────────
     body   = msg["body_text"]
     custom = match_custom(sender, subject, body)
     if custom:
         seller, product, category, rule_base_dir = custom
         if seller == "__exclude__":
             log.info(f"EXCLUDED   {sender} — {subject[:60]}")
-            return {"status": "skipped"}
+            rec = _make_record(msg, account, run_id, "EXCLUDED", None, None, [],
+                               rule_source="custom")
+            return {"status": "excluded", "record": rec}
         root     = rule_base_dir if rule_base_dir else RECEIPTS_DIR
         base_dir = root / category if category else root
         folder_name = f"{date_str} - {sanitize(seller)} - {sanitize(product)} - {label}"
@@ -516,9 +551,12 @@ def process_message(msg: dict, account: dict) -> dict:
         if pdf:
             files.append(pdf)
         _log_saved("DOWNLOADED", folder_name, sender, folder, files)
-        return {"status": "saved", "folder_name": folder_name}
+        rec = _make_record(msg, account, run_id, "DOWNLOADED", folder, folder_name,
+                           files, seller=sanitize(seller), product=sanitize(product),
+                           category=category, rule_source="custom")
+        return {"status": "saved", "record": rec}
 
-    # ── Step 3: fallback ───────────────────────────────────────────────────
+    # ── Step 3: fallback ───────────────────────────────────────────────
     sender_name   = extract_display_name(sender)
     subject_clean = sanitize(subject[:60])
     folder_name   = f"{date_str} - {sender_name} - {subject_clean} - {label}"
@@ -541,17 +579,25 @@ def process_message(msg: dict, account: dict) -> dict:
         "folder_path":   str(folder),
         "resolved":      False,
     })
-    return {"status": "fallback", "folder_name": folder_name,
-            "sender": sender_name, "subject": subject, "account": label}
+    rec = _make_record(msg, account, run_id, "FALLBACK", folder, folder_name, files)
+    return {"status": "fallback", "record": rec}
 
 # ══════════════════════════════════════════════════════════════════════════
 # MAIN
 # ══════════════════════════════════════════════════════════════════════════
 
-def main():
+def main(run_id: str = None, progress_cb=None):
+    run_id = run_id or datetime.datetime.now().isoformat(timespec="seconds")
+
+    def emit(evt):
+        if progress_cb:
+            try:
+                progress_cb(evt)
+            except Exception as e:
+                log.warning(f"progress_cb failed: {e}")
+
     log.info("═" * 60)
     log.info(f"Receipt Saver started — {datetime.datetime.now():%Y-%m-%d %H:%M}")
-
     notify("Receipt Saver מופעל", "בודק תיבות דואר לקבלות חדשות...")
 
     RECEIPTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -560,6 +606,8 @@ def main():
     processed      = load_processed()
     saved_folders  = []
     fallback_items = []
+    excluded_count = 0
+    records        = []
 
     for account in ACCOUNTS:
         label = account["label"]
@@ -569,6 +617,7 @@ def main():
         if not account["creds_file"].exists():
             log.warning(f"  credentials file not found: {account['creds_file'].name} — skipping")
             notify("⚠️ Receipt Saver", f"credentials_{label}.json חסר — דילוג על חשבון {label}")
+            emit({"type": "error", "label": label, "message": "credentials file missing"})
             continue
 
         try:
@@ -576,10 +625,13 @@ def main():
         except Exception as e:
             log.error(f"  Auth failed for {label}: {e}")
             notify("⚠️ Receipt Saver", f"שגיאת כניסה לחשבון {label}")
+            emit({"type": "error", "label": label, "message": f"auth failed: {e}"})
             continue
 
         candidate_ids = provider.list_candidate_ids(service, account, CUSTOM_RULES_FILE)
         log.info(f"  Candidates: {len(candidate_ids)}")
+        emit({"type": "account", "label": label, "email": account["email"],
+              "candidates": len(candidate_ids)})
 
         for mid in candidate_ids:
             # Use account-scoped ID to avoid cross-account collisions
@@ -588,19 +640,28 @@ def main():
                 continue
             try:
                 msg = provider.fetch_message(service, mid, account)
-                result = process_message(msg, account)
+                result = process_message(msg, account, run_id=run_id)
                 status = result.get("status")
+                if status in ("saved", "fallback", "excluded"):
+                    rec = result["record"]
+                    history.append(rec)
+                    records.append(rec)
+                    emit({"type": "mail", "record": rec})
                 if status == "saved":
-                    saved_folders.append(result["folder_name"])
+                    saved_folders.append(result["record"]["folder_name"])
                 elif status == "fallback":
-                    fallback_items.append(result)
+                    fallback_items.append(result["record"])
                     notify(
                         "⚠️ קבלה לא זוהתה",
-                        f"[{label}] מאת: {result['sender']}\n{result['subject'][:80]}",
+                        f"[{label}] מאת: {extract_display_name(result['record']['sender'])}\n"
+                        f"{result['record']['subject'][:80]}",
                         timeout=10,
                     )
+                elif status == "excluded":
+                    excluded_count += 1
             except Exception as e:
                 log.error(f"  Error on {mid}: {e}")
+                emit({"type": "error", "label": label, "message": str(e)})
             finally:
                 processed.add(scoped_id)
 
@@ -617,6 +678,16 @@ def main():
         notify("Receipt Saver", "לא נמצאו קבלות חדשות.", timeout=4)
 
     log.info(f"Done — {len(saved_folders)} saved, {len(fallback_items)} fallback.\n")
+
+    summary = {
+        "run_id":   run_id,
+        "saved":    len(saved_folders),
+        "fallback": len(fallback_items),
+        "excluded": excluded_count,
+        "records":  records,
+    }
+    emit({"type": "done", **{k: summary[k] for k in ("run_id", "saved", "fallback", "excluded")}})
+    return summary
 
 
 if __name__ == "__main__":

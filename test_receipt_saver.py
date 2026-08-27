@@ -4,6 +4,8 @@ import unittest
 from pathlib import Path
 
 from receipt_saver import parse_date, match_custom, unique_folder
+import receipt_saver
+import history as history_mod
 
 
 class TestParseDate(unittest.TestCase):
@@ -85,6 +87,107 @@ class TestUniqueFolder(unittest.TestCase):
         (self.tmp / "dup (2)").mkdir()
         folder, name = unique_folder(self.tmp, "dup")
         self.assertEqual(name, "dup (3)")
+
+
+class TestProcessMessageRecord(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        # Redirect every filesystem side effect into the temp dir.
+        self._orig = {}
+        for name, val in {
+            "RECEIPTS_DIR": self.tmp / "קבלות",
+            "MANUAL_DIR": self.tmp / "קבלות" / "_לטיפול ידני",
+            "JAPANOLOGIA_DIR": self.tmp / "jp",
+            "FALLBACK_LOG_FILE": self.tmp / "fallback_log.json",
+        }.items():
+            self._orig[name] = getattr(receipt_saver, name)
+            setattr(receipt_saver, name, val)
+        receipt_saver.RECEIPTS_DIR.mkdir(parents=True, exist_ok=True)
+        receipt_saver.MANUAL_DIR.mkdir(parents=True, exist_ok=True)
+        # Neutralise external effects.
+        self._pdf = receipt_saver.save_email_pdf
+        self._tt = receipt_saver.create_ticktick_task
+        receipt_saver.save_email_pdf = lambda *a, **k: None
+        receipt_saver.create_ticktick_task = lambda *a, **k: None
+        self._hist = history_mod.HISTORY_FILE
+        history_mod.HISTORY_FILE = self.tmp / "history.json"
+
+    def tearDown(self):
+        for name, val in self._orig.items():
+            setattr(receipt_saver, name, val)
+        receipt_saver.save_email_pdf = self._pdf
+        receipt_saver.create_ticktick_task = self._tt
+        history_mod.HISTORY_FILE = self._hist
+
+    def _msg(self, **over):
+        m = {
+            "id": "abc123", "sender": "noreply@electra-power.co.il",
+            "subject": "חשבונית חשמל 555", "date_raw": "Thu, 9 Jul 2026 14:47:00 +0300",
+            "is_sent": False, "body_text": "", "body_html": "<p>x</p>",
+            "first_attachment_name": "", "attachments": lambda: [],
+            "link": "http://mail/abc123",
+        }
+        m.update(over)
+        return m
+
+    def _account(self):
+        return {"label": "ofek", "email": "ofek.shmuel1@gmail.com"}
+
+    def test_hardcoded_match_returns_full_record(self):
+        # electra-power is a custom rule, not hardcoded; use cellcominv (hardcoded).
+        res = receipt_saver.process_message(
+            self._msg(sender="billing@cellcominv.co.il", subject="חשבונית חודשית"),
+            self._account(), run_id="RID",
+        )
+        self.assertEqual(res["status"], "saved")
+        rec = res["record"]
+        self.assertEqual(rec["id"], "ofek:abc123")
+        self.assertEqual(rec["run_id"], "RID")
+        self.assertEqual(rec["action"], "DOWNLOADED")
+        self.assertEqual(rec["seller"], "סלקום")
+        self.assertEqual(rec["category"], "חשבנות/אינטרנט")
+        self.assertEqual(rec["rule_source"], "hardcoded")
+        self.assertEqual(rec["account"], "ofek")
+
+    def test_fallback_returns_record_and_logs_history(self):
+        res = receipt_saver.process_message(
+            self._msg(sender="who@unknown-xyz.com", subject="mystery"),
+            self._account(), run_id="RID",
+        )
+        self.assertEqual(res["status"], "fallback")
+        rec = res["record"]
+        self.assertEqual(rec["action"], "FALLBACK")
+        self.assertIsNone(rec["seller"])
+        self.assertEqual(rec["rule_source"], None)
+
+    def test_sent_mail_returns_skipped_no_record(self):
+        res = receipt_saver.process_message(
+            self._msg(is_sent=True), self._account(), run_id="RID",
+        )
+        self.assertEqual(res["status"], "skipped")
+        self.assertNotIn("record", res)
+
+
+class TestMainProgressCallback(unittest.TestCase):
+    def setUp(self):
+        # Never touch real mailboxes / OneDrive from a test.
+        self._accounts = receipt_saver.ACCOUNTS
+        self._notify = receipt_saver.notify
+        receipt_saver.ACCOUNTS = []
+        receipt_saver.notify = lambda *a, **k: None
+
+    def tearDown(self):
+        receipt_saver.ACCOUNTS = self._accounts
+        receipt_saver.notify = self._notify
+
+    def test_main_accepts_progress_cb_and_returns_summary(self):
+        events = []
+        summary = receipt_saver.main(run_id="RID", progress_cb=events.append)
+        self.assertEqual(summary["run_id"], "RID")
+        self.assertEqual(summary["saved"], 0)
+        self.assertEqual(summary["fallback"], 0)
+        self.assertEqual([e["type"] for e in events], ["done"])
 
 
 if __name__ == "__main__":
