@@ -15,6 +15,7 @@ $$(".tab").forEach(t => t.addEventListener("click", () => {
   $("#view-" + t.dataset.view).classList.add("active");
   if (t.dataset.view === "history" && histRows.length === 0) loadHistory();
   if (t.dataset.view === "fallbacks") loadFallbacks();
+  if (t.dataset.view === "receipts") rxInit();
 }));
 
 // ---- window dragging ---------------------------------------------------
@@ -217,6 +218,98 @@ function toast(msg, isError) {
   $("#toast-host").appendChild(d);
   setTimeout(() => d.remove(), 4000);
 }
+
+// ---- Receipts explorer -------------------------------------------------
+let rxRoots = [], rxCurrent = null, rxLoaded = false;
+const RX_GLYPH = { folder: "📁", "receipt-folder": "🧾", pdf: "📄", file: "▪" };
+
+function humanSize(n) {
+  if (n == null) return "";
+  const u = ["B", "KB", "MB", "GB"];
+  let i = 0, v = n;
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+  return (i === 0 ? v : v.toFixed(1)) + " " + u[i];
+}
+
+async function rxInit() {
+  if (rxLoaded) return;
+  rxLoaded = true;
+  rxRoots = await api().list_roots();
+  const nav = $(".rx-nav");
+  nav.innerHTML = "";
+  rxRoots.forEach(root => {
+    const n = $("#tpl-rx-root").content.cloneNode(true);
+    const btn = n.querySelector(".rx-root");
+    $(".rx-root-label", n).textContent = root.label;
+    if (!root.exists) btn.classList.add("missing");
+    btn.title = root.path;
+    btn.addEventListener("click", () => rxBrowse(root.path));
+    nav.appendChild(n);
+  });
+  const first = rxRoots.find(r => r.exists) || rxRoots[0];
+  if (first) rxBrowse(first.path);
+}
+
+async function rxBrowse(path) {
+  const res = await api().browse(path);
+  if (res.error && (!res.crumbs || !res.crumbs.length)) { toast(res.error, true); return; }
+  rxCurrent = res.path || path;
+
+  $$(".rx-root").forEach((btn, i) => btn.classList.toggle(
+    "active", rxRoots[i] && rxCurrent &&
+    rxCurrent.toLowerCase().startsWith(rxRoots[i].path.toLowerCase())));
+
+  const trail = $(".rx-crumb-trail");
+  trail.innerHTML = "";
+  (res.crumbs || []).forEach((c, i, arr) => {
+    if (i) {
+      const s = document.createElement("span");
+      s.className = "rx-sep"; s.textContent = "›";
+      trail.appendChild(s);
+    }
+    const b = document.createElement("button");
+    b.className = "rx-crumb" + (i === arr.length - 1 ? " here" : "");
+    b.textContent = c.name;
+    if (i < arr.length - 1) b.addEventListener("click", () => rxBrowse(c.path));
+    trail.appendChild(b);
+  });
+
+  const list = $(".rx-list");
+  list.innerHTML = "";
+  const empty = $(".rx-empty");
+  if (res.error) {
+    empty.hidden = false;
+    empty.textContent = res.error === "folder not found"
+      ? "This folder doesn't exist yet." : res.error;
+    return;
+  }
+  if (!res.entries.length) {
+    empty.hidden = false;
+    empty.textContent = "This folder is empty.";
+    return;
+  }
+  empty.hidden = true;
+  for (const e of res.entries) {
+    const n = $("#tpl-rx-row").content.cloneNode(true);
+    const row = n.querySelector(".rx-row");
+    $(".rx-glyph", n).textContent = RX_GLYPH[e.kind] || RX_GLYPH.file;
+    $(".rx-name", n).textContent = e.name;
+    $(".rx-meta", n).textContent = e.is_dir ? "" : humanSize(e.size);
+    if (e.is_dir) {
+      row.classList.add("dir");
+      row.addEventListener("click", () => rxBrowse(e.path));
+      row.addEventListener("keydown", ev => { if (ev.key === "Enter") rxBrowse(e.path); });
+    } else {
+      row.addEventListener("dblclick", () => api().open_path(e.path));
+      row.addEventListener("keydown", ev => { if (ev.key === "Enter") api().open_path(e.path); });
+    }
+    list.appendChild(n);
+  }
+}
+
+$("#rx-open").addEventListener("click", () => {
+  if (rxCurrent) api().open_path(rxCurrent);
+});
 
 window.addEventListener("pywebviewready", () => {
   resetRunView();
