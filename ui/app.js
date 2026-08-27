@@ -6,6 +6,7 @@ const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 
 let CATEGORIES = [];
 let histOffset = 0, histLoading = false, histDone = false, histRows = [];
+let fbSimple = false;
 
 // ---- view switching ------------------------------------------------------
 $$(".tab").forEach(t => t.addEventListener("click", () => {
@@ -101,11 +102,11 @@ function runDoneMessage(d) {
   const s = d.saved || 0, f = d.fallback || 0, x = d.excluded || 0;
   if (s > 0) {
     let m = `Scan complete — ${s} new receipt${s === 1 ? "" : "s"} saved`;
-    if (f) m += ` · ${f} need review`;
+    if (f) m += ` · ${f} need${f === 1 ? "s" : ""} review`;
     if (x) m += ` · ${x} skipped`;
     return m + ".";
   }
-  if (f > 0) return `Scan complete — no new receipts; ${f} need review.`;
+  if (f > 0) return `Scan complete — no new receipts; ${f} need${f === 1 ? "s" : ""} review.`;
   return "Scan complete — no new mail found.";
 }
 
@@ -119,8 +120,9 @@ function renderRunDone(d) {
 async function syncRun() {
   try {
     const run = await api().get_run();
+    const cur = $("#run-summary").textContent;
     if ((run.status === "done" || run.status === "error") &&
-        $("#run-summary").textContent.startsWith("Scanning")) {
+        (cur === "" || cur.startsWith("Scanning"))) {
       const last = [...(run.events || [])].reverse().find(e => e.type === "done")
                  || { status: run.status, ...(run.summary || {}) };
       renderRunDone(last);
@@ -156,41 +158,48 @@ new IntersectionObserver(es => {
 // ---- fallbacks view ----------------------------------------------------
 async function loadFallbacks() {
   if (!CATEGORIES.length) CATEGORIES = await api().categories();
+  const st = await api().get_ui_state();
+  fbSimple = !!st.fallbacks_simple;
+  $("#fb-viewtoggle").textContent = fbSimple ? "Detailed view" : "Simple view";
   const list = $("#fb-list");
   list.innerHTML = "";
   const items = await api().get_fallbacks();
   $("#fb-empty").hidden = items.length > 0;
-  for (const it of items) list.appendChild(await fallbackCard(it));
+  for (const it of items) {
+    list.appendChild(fbSimple ? fallbackCompact(it) : await fallbackCard(it));
+  }
   updateHandoffButton();
   refreshBadge(items.length);
 }
-async function fallbackCard(it) {
-  const n = $("#tpl-fallback").content.cloneNode(true);
-  $(".card-title", n).textContent = it.subject || "(no subject)";
-  $(".card-sub", n).textContent = `${it.sender} · ${it.account}`;
-  $(".open-folder", n).addEventListener("click", e => {
+
+$("#fb-viewtoggle").addEventListener("click", async () => {
+  await api().set_ui_state({ fallbacks_simple: !fbSimple });
+  loadFallbacks();
+});
+
+function fbHeader(scope, it) {
+  $(".card-title", scope).textContent = it.subject || "(no subject)";
+  $(".card-sub", scope).textContent =
+    `${it.sender} · ${it.account} · ${(it.date || "").replace(/_/g, "-")}`;
+  $(".open-folder", scope).addEventListener("click", e => {
     e.preventDefault(); api().open_folder(it.folder_path);
   });
-  $(".open-pdf", n).addEventListener("click", e => {
-    e.preventDefault(); api().open_folder(it.folder_path + "\\email.pdf");
-  });
-  const sel = $(".f-category", n);
+  $(".fb-check", scope).addEventListener("change", updateHandoffButton);
+}
+
+function wireForm(scope, it, s) {
+  const sel = $(".f-category", scope);
   sel.innerHTML = `<option value="">no category</option>` +
     CATEGORIES.map(c => `<option value="${c}">${c}</option>`).join("");
-
-  const s = await api().suggest_fallback(it.message_id);
-  $(".f-seller", n).value = s.seller || "";
-  $(".f-product", n).value = s.product || "";
+  $(".f-seller", scope).value = s.seller || "";
+  $(".f-product", scope).value = s.product || "";
   if (s.category) sel.value = s.category;
-  $(".f-sender", n).value = s.match_sender_contains || "";
-  if (s.kind) { const r = $(`.fb-form input[value="${s.kind}"]`, n); if (r) r.checked = true; }
-  const conf = $(".conf", n);
-  conf.textContent = s.confidence === "low"
-    ? "low confidence — consider handling with Claude" : (s.confidence || "") + " confidence";
-  conf.classList.add(s.confidence || "medium");
-
-  $(".fb-check", n).addEventListener("change", updateHandoffButton);
-  $(".fb-form", n).addEventListener("submit", async e => {
+  $(".f-sender", scope).value = s.match_sender_contains || "";
+  if (s.kind) {
+    const r = scope.querySelector(`.fb-form input[value="${s.kind}"]`);
+    if (r) r.checked = true;
+  }
+  $(".fb-form", scope).addEventListener("submit", async e => {
     e.preventDefault();
     const form = e.currentTarget;
     const decision = {
@@ -211,11 +220,53 @@ async function fallbackCard(it) {
       toast((res && res.error) || "Failed to apply", true);
     }
   });
+}
+
+async function fallbackCard(it) {
+  const n = $("#tpl-fallback").content.cloneNode(true);
+  fbHeader(n, it);
+  $(".open-pdf", n).addEventListener("click", e => {
+    e.preventDefault(); api().open_path(it.folder_path + "\\email.pdf");
+  });
+  const s = await api().suggest_fallback(it.message_id);
+  const conf = $(".conf", n);
+  conf.textContent = s.confidence === "low"
+    ? "low confidence — consider handling with Claude" : (s.confidence || "") + " confidence";
+  conf.classList.add(s.confidence || "medium");
+  wireForm(n, it, s);
   n.querySelector(".card").dataset.mid = it.message_id;
   return n;
 }
+
+function fallbackCompact(it) {
+  const n = $("#tpl-fb-compact").content.cloneNode(true);
+  fbHeader(n, it);
+  n.querySelector(".card").dataset.mid = it.message_id;
+  const slot = n.querySelector(".fb-form-slot");
+  const caret = n.querySelector(".fb-expand");
+  let built = false;
+  const toggle = async () => {
+    const opening = slot.hidden;
+    slot.hidden = !opening;
+    caret.classList.toggle("open", opening);
+    if (opening && !built) {
+      built = true;
+      const form = $("#tpl-fallback").content.cloneNode(true).querySelector(".fb-form");
+      slot.appendChild(form);
+      const s = await api().suggest_fallback(it.message_id);
+      wireForm(slot, it, s);
+    }
+  };
+  caret.addEventListener("click", e => { e.stopPropagation(); toggle(); });
+  n.querySelector(".card-main").addEventListener("click", toggle);
+  return n;
+}
+
 function selectedFallbackIds() {
-  return $$(".card.fb").filter(c => $(".fb-check", c).checked).map(c => c.dataset.mid);
+  return $$("#fb-list .card").filter(c => {
+    const cb = $(".fb-check", c);
+    return cb && cb.checked;
+  }).map(c => c.dataset.mid);
 }
 function updateHandoffButton() {
   $("#fb-handoff").disabled = selectedFallbackIds().length === 0;

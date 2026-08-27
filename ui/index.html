@@ -39,6 +39,7 @@
 
     <section id="view-fallbacks" class="view">
       <div class="fb-toolbar">
+        <button id="fb-viewtoggle">Simple view</button>
         <button id="fb-handoff" disabled>Handle selected with Claude &rarr;</button>
       </div>
       <div id="fb-list" class="cards"></div>
@@ -150,6 +151,20 @@
           <button type="submit" class="fb-apply">Apply</button>
         </form>
       </div>
+    </article>
+  </template>
+
+  <template id="tpl-fb-compact">
+    <article class="card fb-compact">
+      <input type="checkbox" class="fb-check" title="Select for &quot;Handle selected with Claude&quot;">
+      <div class="card-main">
+        <div class="card-title" dir="auto"></div>
+        <div class="card-sub" dir="auto"></div>
+      </div>
+      <span class="conf"></span>
+      <a class="open-folder" href="#">Open folder</a>
+      <button class="fb-expand" title="Show options">&#9656;</button>
+      <div class="fb-form-slot" hidden></div>
     </article>
   </template>
 

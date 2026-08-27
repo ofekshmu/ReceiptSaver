@@ -72,6 +72,20 @@ main { flex: 1; overflow: hidden; position: relative; }
   background: var(--accent); color: #fff; border: 0; padding: 8px 14px;
   border-radius: 8px; cursor: pointer;
 }
+#fb-viewtoggle {
+  background: var(--panel-2); color: var(--muted); border: 0; padding: 8px 14px;
+  border-radius: 8px; cursor: pointer; margin-inline-end: 8px;
+}
+#fb-viewtoggle:hover { color: var(--text); }
+.card.fb-compact { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 10px; }
+.card.fb-compact .card-main { flex: 1 1 240px; cursor: pointer; }
+.fb-expand {
+  background: transparent; border: 0; color: var(--muted); cursor: pointer;
+  font-size: 14px; padding: 2px 6px; border-radius: 5px;
+}
+.fb-expand:hover { color: var(--text); background: var(--panel-2); }
+.fb-expand.open { transform: rotate(90deg); }
+.fb-form-slot { flex-basis: 100%; }
 #fb-handoff:disabled { background: var(--panel-2); color: var(--muted); cursor: default; }
 .card.fb { align-items: flex-start; flex-direction: row; }
 .fb-form { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
