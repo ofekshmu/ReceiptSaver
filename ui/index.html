@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Receipt Saver</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <header class="titlebar">
+    <div class="brand">Receipt&nbsp;Saver</div>
+    <nav class="tabs">
+      <button data-view="run" class="tab active">This run</button>
+      <button data-view="history" class="tab">History</button>
+      <button data-view="fallbacks" class="tab">Fallbacks <span id="fb-badge" class="badge" hidden>0</span></button>
+    </nav>
+    <div class="win-controls">
+      <button id="btn-rescan" title="Run scan now">&#10227;</button>
+      <button id="btn-min" title="Minimize">&#8211;</button>
+      <button id="btn-close" title="Close to tray">&times;</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="view-run" class="view active">
+      <div id="run-summary" class="summary"></div>
+      <div id="run-list" class="cards"></div>
+      <div id="run-empty" class="empty" hidden>Nothing new this run.</div>
+    </section>
+
+    <section id="view-history" class="view">
+      <div class="filters">
+        <input id="hist-search" type="search" placeholder="Search sender, subject, seller&hellip;" dir="auto">
+      </div>
+      <div id="hist-list" class="cards"></div>
+      <div id="hist-sentinel"></div>
+    </section>
+
+    <section id="view-fallbacks" class="view">
+      <div class="fb-toolbar">
+        <button id="fb-handoff" disabled>Handle selected with Claude &rarr;</button>
+      </div>
+      <div id="fb-list" class="cards"></div>
+      <div id="fb-empty" class="empty" hidden>No unresolved fallbacks. &#127881;</div>
+    </section>
+  </main>
+
+  <div id="toast-host"></div>
+
+  <template id="tpl-card">
+    <article class="card">
+      <span class="pill"></span>
+      <div class="card-main">
+        <div class="card-title" dir="auto"></div>
+        <div class="card-sub" dir="auto"></div>
+      </div>
+      <div class="card-meta">
+        <span class="chip account"></span>
+        <span class="date"></span>
+        <a class="open-folder" href="#">Open folder</a>
+      </div>
+    </article>
+  </template>
+
+  <template id="tpl-fallback">
+    <article class="card fb">
+      <input type="checkbox" class="fb-check">
+      <div class="card-main">
+        <div class="card-title" dir="auto"></div>
+        <div class="card-sub" dir="auto"></div>
+        <div class="fb-links">
+          <a class="open-folder" href="#">Open folder</a>
+          <a class="open-pdf" href="#">Open email.pdf</a>
+          <span class="conf"></span>
+        </div>
+        <form class="fb-form">
+          <label><input type="radio" name="kind" value="rule" checked> Make a rule</label>
+          <label><input type="radio" name="kind" value="once"> Move this one only</label>
+          <label><input type="radio" name="kind" value="exclude"> Exclude as promotional</label>
+          <label><input type="radio" name="kind" value="skip"> Skip for now</label>
+          <div class="fb-fields">
+            <input class="f-seller" placeholder="Seller" dir="auto">
+            <input class="f-product" placeholder="Product" dir="auto">
+            <select class="f-category"></select>
+            <input class="f-basedir" placeholder="Destination root (optional)" dir="auto">
+            <input class="f-sender" placeholder="match sender contains" dir="auto">
+            <input class="f-subject" placeholder="match subject contains (optional)" dir="auto">
+          </div>
+          <button type="submit" class="fb-apply">Apply</button>
+        </form>
+      </div>
+    </article>
+  </template>
+
+  <script src="app.js"></script>
+</body>
+</html>

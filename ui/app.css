@@ -1,0 +1,96 @@
+:root {
+  --bg: #0f1115; --panel: #171a21; --panel-2: #1e222b; --line: #2a2f3a;
+  --text: #e7e9ee; --muted: #9aa3b2; --accent: #4f8cff;
+  --ok: #3fb950; --warn: #d29922; --bad: #f85149; --info: #6e7681;
+  font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); }
+body { display: flex; flex-direction: column; font-size: 14px; }
+
+.titlebar {
+  display: flex; align-items: center; gap: 16px;
+  padding: 10px 14px; background: var(--panel); border-bottom: 1px solid var(--line);
+  -webkit-user-select: none; user-select: none;
+}
+.brand { font-weight: 600; letter-spacing: .3px; }
+.tabs { display: flex; gap: 4px; }
+.tab {
+  background: transparent; color: var(--muted); border: 0; padding: 6px 12px;
+  border-radius: 8px; cursor: pointer; font-size: 13px;
+}
+.tab.active { background: var(--panel-2); color: var(--text); }
+.badge {
+  display: inline-block; min-width: 18px; text-align: center; font-size: 11px;
+  background: var(--warn); color: #1a1a1a; border-radius: 9px; padding: 0 5px;
+}
+.win-controls { margin-inline-start: auto; display: flex; gap: 4px; }
+.win-controls button {
+  width: 28px; height: 28px; border: 0; border-radius: 6px; cursor: pointer;
+  background: var(--panel-2); color: var(--muted); font-size: 15px;
+}
+.win-controls button:hover { color: var(--text); }
+
+main { flex: 1; overflow: hidden; position: relative; }
+.view { position: absolute; inset: 0; overflow-y: auto; padding: 16px; display: none; }
+.view.active { display: block; }
+
+.summary { color: var(--muted); margin-bottom: 12px; min-height: 18px; }
+.cards { display: flex; flex-direction: column; gap: 8px; }
+.card {
+  display: flex; align-items: center; gap: 12px; padding: 12px 14px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+}
+.card-main { flex: 1; min-width: 0; }
+.card-title { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card-sub { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card-meta { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--muted); }
+.chip { background: var(--panel-2); border-radius: 6px; padding: 2px 7px; }
+.open-folder, .open-pdf { color: var(--accent); text-decoration: none; }
+.open-folder:hover, .open-pdf:hover { text-decoration: underline; }
+
+.pill {
+  font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 999px;
+  background: var(--info); color: #fff; text-transform: lowercase;
+}
+.pill.downloaded, .pill.resolved { background: var(--ok); }
+.pill.icount, .pill.japanologia { background: var(--accent); }
+.pill.fallback { background: var(--warn); color: #1a1a1a; }
+.pill.excluded { background: var(--info); }
+
+.filters { margin-bottom: 12px; }
+#hist-search {
+  width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--panel); color: var(--text);
+}
+
+.empty { color: var(--muted); text-align: center; margin-top: 40px; }
+
+.fb-toolbar { margin-bottom: 12px; }
+#fb-handoff, .fb-apply {
+  background: var(--accent); color: #fff; border: 0; padding: 8px 14px;
+  border-radius: 8px; cursor: pointer;
+}
+#fb-handoff:disabled { background: var(--panel-2); color: var(--muted); cursor: default; }
+.card.fb { align-items: flex-start; flex-direction: row; }
+.fb-form { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+.fb-form label { color: var(--muted); font-size: 13px; }
+.fb-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 6px 0; }
+.fb-fields input, .fb-fields select {
+  padding: 6px 8px; border-radius: 6px; border: 1px solid var(--line);
+  background: var(--panel-2); color: var(--text);
+}
+.fb-links { display: flex; gap: 12px; font-size: 12px; margin-top: 4px; }
+.conf.low { color: var(--warn); }
+.conf.medium { color: var(--muted); }
+.conf.high { color: var(--ok); }
+
+#toast-host {
+  position: fixed; right: 14px; bottom: 14px; display: flex; flex-direction: column;
+  gap: 8px; z-index: 50;
+}
+.toast {
+  background: var(--panel-2); border: 1px solid var(--line); border-left: 3px solid var(--accent);
+  padding: 10px 14px; border-radius: 8px; max-width: 320px;
+}
+.toast.error { border-left-color: var(--bad); }
