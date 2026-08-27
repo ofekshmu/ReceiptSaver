@@ -18,26 +18,24 @@ $$(".tab").forEach(t => t.addEventListener("click", () => {
   if (t.dataset.view === "receipts") rxInit();
 }));
 
-// ---- window dragging ---------------------------------------------------
-// easy_drag drifts; instead track the cursor's grab offset within the window
-// and set the absolute window position to (screenPos - grabOffset).
+// ---- window dragging -------------------------------------------------
+// This webview reports screenX/Y window-relative, so absolute math drifts.
+// Use origin-independent pointer deltas and let Python keep the position.
 (function enableDrag() {
   const bar = $(".titlebar");
-  let dragging = false, grabX = 0, grabY = 0, pending = null, raf = 0;
+  let dragging = false, dx = 0, dy = 0, raf = 0;
   const flush = () => {
     raf = 0;
-    if (pending) { api().move_window(pending[0], pending[1]); pending = null; }
+    if (dx || dy) { api().move_by(Math.round(dx), Math.round(dy)); dx = dy = 0; }
   };
   bar.addEventListener("pointerdown", e => {
     if (e.button !== 0 || e.target.closest("button, .tab")) return;
-    dragging = true;
-    grabX = e.clientX;
-    grabY = e.clientY;
+    dragging = true; dx = dy = 0;
     try { bar.setPointerCapture(e.pointerId); } catch (_) {}
   });
   bar.addEventListener("pointermove", e => {
     if (!dragging) return;
-    pending = [Math.round(e.screenX - grabX), Math.round(e.screenY - grabY)];
+    dx += e.movementX; dy += e.movementY;
     if (!raf) raf = requestAnimationFrame(flush);
   });
   const end = e => {
