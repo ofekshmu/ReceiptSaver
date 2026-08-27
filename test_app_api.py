@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import time
 import unittest
@@ -145,6 +146,92 @@ class TestExplorerApi(unittest.TestCase):
         self.assertEqual(res["error"], "folder not found")
         self.assertEqual(res["entries"], [])
         self.assertEqual([c["name"] for c in res["crumbs"]], ["קבלות", "nope"])
+
+
+class TestUiStateApi(unittest.TestCase):
+    def setUp(self):
+        import ui_state
+        self.p = Path(tempfile.mkdtemp()) / "ui_state.json"
+        self._orig = ui_state.UI_STATE_FILE
+        ui_state.UI_STATE_FILE = self.p
+        self.addCleanup(setattr, ui_state, "UI_STATE_FILE", self._orig)
+
+    def _api(self):
+        return appmod.Api(scan_fn=lambda run_id, progress_cb: {
+            "run_id": run_id, "saved": 0, "fallback": 0, "excluded": 0, "records": []})
+
+    def test_get_ui_state_default_shape(self):
+        s = self._api().get_ui_state()
+        self.assertIn("hidden_roots", s)
+        self.assertIn("fallbacks_simple", s)
+
+    def test_set_ui_state_merges_and_persists(self):
+        api = self._api()
+        api.set_ui_state({"fallbacks_simple": True})
+        api.set_ui_state({"hidden_roots": ["c:\\x"]})
+        s = api.get_ui_state()
+        self.assertTrue(s["fallbacks_simple"])
+        self.assertEqual(s["hidden_roots"], ["c:\\x"])
+
+
+class TestSearchReceipts(unittest.TestCase):
+    def setUp(self):
+        import receipt_roots
+        self.tmp = Path(tempfile.mkdtemp())
+        self.r1 = self.tmp / "קבלות"
+        self.r2 = self.tmp / "נכסים"
+        (self.r1 / "חשבנות" / "2026_08_25 - סלקום - חשבונית - ofek").mkdir(parents=True)
+        (self.r2 / "2026_07_01 - סלקום - חשבונית - family").mkdir(parents=True)
+        (self.r1 / "readme_סלקום.txt").write_text("x", encoding="utf-8")
+        self._roots = [{"label": "קבלות", "path": str(self.r1)},
+                       {"label": "נכסים", "path": str(self.r2)}]
+        self._orig = receipt_roots.discover_roots
+        receipt_roots.discover_roots = lambda rules_path=None: self._roots
+        self.addCleanup(setattr, receipt_roots, "discover_roots", self._orig)
+
+    def _api(self):
+        return appmod.Api(scan_fn=lambda run_id, progress_cb: None)
+
+    def test_finds_matches_across_all_roots(self):
+        res = self._api().search_receipts("סלקום")
+        names = sorted(r["rel"] for r in res["results"])
+        self.assertIn(os.path.join("חשבנות", "2026_08_25 - סלקום - חשבונית - ofek"), names)
+        self.assertIn("2026_07_01 - סלקום - חשבונית - family", names)
+        kinds = {r["kind"] for r in res["results"] if r["is_dir"]}
+        self.assertEqual(kinds, {"receipt-folder"})
+        self.assertEqual({r["root_label"] for r in res["results"]}, {"קבלות", "נכסים"})
+
+    def test_short_query_returns_empty(self):
+        self.assertEqual(self._api().search_receipts("a")["results"], [])
+
+    def test_limit_and_truncated_flag(self):
+        res = self._api().search_receipts("סלקום", limit=1)
+        self.assertEqual(len(res["results"]), 1)
+        self.assertTrue(res["truncated"])
+
+
+class TestRunScanTerminates(unittest.TestCase):
+    def _run(self, scan_fn):
+        api = appmod.Api(scan_fn=scan_fn)
+        api._run = {"status": "running", "events": [], "summary": None}
+        api._run_scan("RID")
+        return api._run
+
+    def test_done_emitted_even_when_scan_raises(self):
+        def boom(run_id, progress_cb):
+            raise RuntimeError("nope")
+        run = self._run(boom)
+        dones = [e for e in run["events"] if e["type"] == "done"]
+        self.assertEqual(len(dones), 1)
+        self.assertEqual(run["status"], "error")
+
+    def test_single_done_on_normal_scan(self):
+        def ok(run_id, progress_cb):
+            return {"run_id": run_id, "saved": 2, "fallback": 0, "excluded": 0, "records": []}
+        run = self._run(ok)
+        dones = [e for e in run["events"] if e["type"] == "done"]
+        self.assertEqual(len(dones), 1)
+        self.assertEqual(dones[0]["saved"], 2)
 
 
 if __name__ == "__main__":

@@ -20,6 +20,7 @@ import history
 import fallback_ops
 import claude_handoff
 import receipt_roots
+import ui_state
 
 SCRIPT_DIR        = Path(r"C:\Users\ofeks\Scripts\ReceiptSaver")
 UI_DIR            = SCRIPT_DIR / "ui"
@@ -42,6 +43,8 @@ class Api:
         self._scan_fn = scan_fn or receipt_saver.main
         self._fallback_log_path = Path(fallback_log_path or FALLBACK_LOG_FILE)
         self._window = None
+        self._win_x = None
+        self._win_y = None
         self._lock = threading.Lock()
         self._thread = None
         self._run = {"status": "idle", "events": [], "summary": None}
@@ -75,19 +78,23 @@ class Api:
             return {"status": "running", "run_id": run_id}
 
     def _run_scan(self, run_id: str):
+        summary = {"run_id": run_id, "saved": 0, "fallback": 0,
+                   "excluded": 0, "records": []}
         try:
-            summary = self._scan_fn(run_id=run_id, progress_cb=self._push)
-            self._run["summary"] = summary
+            summary = self._scan_fn(run_id=run_id, progress_cb=self._push) or summary
             self._run["status"] = "done"
+        except Exception as e:
+            self._run["status"] = "error"
+            self._push({"type": "error", "label": "-", "message": str(e)})
+        finally:
+            self._run["summary"] = summary
             if not any(e.get("type") == "done" for e in self._run["events"]):
                 self._push({"type": "done",
                             "run_id": summary.get("run_id", run_id),
                             "saved": summary.get("saved", 0),
                             "fallback": summary.get("fallback", 0),
-                            "excluded": summary.get("excluded", 0)})
-        except Exception as e:
-            self._run["status"] = "error"
-            self._push({"type": "error", "label": "-", "message": str(e)})
+                            "excluded": summary.get("excluded", 0),
+                            "status": self._run["status"]})
 
     def get_run(self) -> dict:
         return self._run
@@ -150,6 +157,57 @@ class Api:
 
     def categories(self) -> list:
         return fallback_ops.CATEGORIES
+
+    # -- ui state ---------------------------------------------------------
+    def get_ui_state(self) -> dict:
+        return ui_state.load()
+
+    def set_ui_state(self, patch: dict) -> dict:
+        return ui_state.save(patch or {})
+
+    # -- receipts search ------------------------------------------------
+    def search_receipts(self, query: str, limit: int = 200) -> dict:
+        q = (query or "").strip().lower()
+        if len(q) < 2:
+            return {"query": query, "results": [], "truncated": False}
+        results, truncated = [], False
+        for root in receipt_roots.discover_roots():
+            rp = root["path"]
+            if not os.path.isdir(rp):
+                continue
+            base_depth = rp.rstrip("\\/").count(os.sep)
+            for cur, dirs, files in os.walk(rp):
+                if cur.count(os.sep) - base_depth > 6:
+                    dirs[:] = []
+                    continue
+                for d in list(dirs):
+                    if q in d.lower():
+                        full = os.path.join(cur, d)
+                        results.append(self._search_hit(full, True, root["label"], rp))
+                        dirs.remove(d)
+                for f in files:
+                    if q in f.lower():
+                        results.append(self._search_hit(os.path.join(cur, f), False,
+                                                        root["label"], rp))
+                if len(results) >= limit:
+                    truncated = True
+                    break
+            if truncated:
+                break
+        results.sort(key=lambda r: (0 if r["is_dir"] else 1,
+                                    r["root_label"].lower(), r["rel"].lower()))
+        return {"query": query, "results": results[:limit], "truncated": truncated}
+
+    def _search_hit(self, full: str, is_dir: bool, root_label: str, root_path: str) -> dict:
+        name = os.path.basename(full)
+        if is_dir:
+            kind = "receipt-folder" if _DATED_RE.match(name) else "folder"
+        elif name.lower().endswith(".pdf"):
+            kind = "pdf"
+        else:
+            kind = "file"
+        return {"name": name, "path": full, "is_dir": is_dir, "kind": kind,
+                "root_label": root_label, "rel": os.path.relpath(full, root_path)}
 
     # -- receipts explorer (read-only) --------------------------------------
     def list_roots(self) -> list:
@@ -222,15 +280,30 @@ class Api:
         entries.sort(key=_entry_sort_key)
         return {"path": str(p), "label": label, "crumbs": crumbs, "entries": entries}
 
-    def move_window(self, x, y):
-        """Absolute-position the frameless window. The page computes (x, y) from
-        the pointer's screen position minus the grab offset, so there is no
-        drift between where the user grabbed and where the window lands."""
-        if self._window:
+    def _ensure_pos(self):
+        if self._win_x is None or self._win_y is None:
             try:
-                self._window.move(int(x), int(y))
+                import webview
+                scr = webview.screens[0]
+                self._win_x = max(0, (scr.width  - int(self._window.width))  // 2)
+                self._win_y = max(0, (scr.height - int(self._window.height)) // 2)
             except Exception:
-                pass
+                self._win_x, self._win_y = 120, 120
+
+    def move_by(self, dx, dy):
+        """Relative window move. The page sends origin-independent pointer
+        deltas (movementX/movementY); we keep the absolute position here so we
+        never depend on the webview's screenX (which is window-relative on this
+        backend and made the drag jump)."""
+        if not self._window:
+            return
+        self._ensure_pos()
+        self._win_x += int(dx)
+        self._win_y += int(dy)
+        try:
+            self._window.move(self._win_x, self._win_y)
+        except Exception:
+            pass
 
     def minimize(self):
         if self._window:
@@ -259,14 +332,23 @@ def main():
             "run_id": run_id, "saved": 0, "fallback": 0, "excluded": 0, "records": []})
     else:
         api = Api()
+
+    try:
+        scr = webview.screens[0]
+        win_x = max(0, (scr.width  - 980) // 2)
+        win_y = max(0, (scr.height - 680) // 2)
+    except Exception:
+        win_x, win_y = 120, 120
+
     window = webview.create_window(
         "Receipt Saver",
         url=str(UI_DIR / "index.html"),
         js_api=api,
-        width=980, height=680,
+        width=980, height=680, x=win_x, y=win_y,
         frameless=True, easy_drag=False,
         background_color="#0f1115",
     )
+    api._win_x, api._win_y = win_x, win_y
     api.bind(window)
 
     def _bootstrap():
