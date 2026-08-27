@@ -13,6 +13,7 @@ $$(".tab").forEach(t => t.addEventListener("click", () => {
   $$(".view").forEach(x => x.classList.remove("active"));
   t.classList.add("active");
   $("#view-" + t.dataset.view).classList.add("active");
+  if (t.dataset.view === "run") syncRun();
   if (t.dataset.view === "history" && histRows.length === 0) loadHistory();
   if (t.dataset.view === "fallbacks") loadFallbacks();
   if (t.dataset.view === "receipts") rxInit();
@@ -91,15 +92,41 @@ window.onScanEvent = function (evt) {
     d.textContent = `${evt.label}: ${evt.message}`;
     $("#run-list").appendChild(d);
   } else if (evt.type === "done") {
-    const parts = [`${evt.saved} saved`, `${evt.fallback} fallback`];
-    if (evt.excluded) parts.push(`${evt.excluded} excluded`);
-    $("#run-summary").textContent = parts.join(" · ");
-    if (evt.saved === 0 && evt.fallback === 0 && evt.excluded === 0) {
-      $("#run-empty").hidden = false;
-    }
-    refreshBadge();
+    renderRunDone(evt);
   }
 };
+
+function runDoneMessage(d) {
+  if (d.status === "error") return "Scan stopped early — see errors above.";
+  const s = d.saved || 0, f = d.fallback || 0, x = d.excluded || 0;
+  if (s > 0) {
+    let m = `Scan complete — ${s} new receipt${s === 1 ? "" : "s"} saved`;
+    if (f) m += ` · ${f} need review`;
+    if (x) m += ` · ${x} skipped`;
+    return m + ".";
+  }
+  if (f > 0) return `Scan complete — no new receipts; ${f} need review.`;
+  return "Scan complete — no new mail found.";
+}
+
+function renderRunDone(d) {
+  $("#run-summary").textContent = runDoneMessage(d);
+  const nothing = !(d.saved || d.fallback || d.excluded);
+  $("#run-empty").hidden = !nothing || d.status === "error";
+  refreshBadge();
+}
+
+async function syncRun() {
+  try {
+    const run = await api().get_run();
+    if ((run.status === "done" || run.status === "error") &&
+        $("#run-summary").textContent.startsWith("Scanning")) {
+      const last = [...(run.events || [])].reverse().find(e => e.type === "done")
+                 || { status: run.status, ...(run.summary || {}) };
+      renderRunDone(last);
+    }
+  } catch (_) {}
+}
 
 // ---- history view ----------------------------------------------------
 async function loadHistory() {
