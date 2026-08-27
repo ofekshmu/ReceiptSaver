@@ -145,12 +145,31 @@ main { flex: 1; overflow: hidden; position: relative; }
 
 .rx-list { flex: 1; overflow-y: auto; padding: 8px; }
 .rx-row {
-  display: flex; align-items: center; gap: 10px; padding: 7px 10px;
-  border-radius: 7px; cursor: default;
+  display: flex; align-items: center; gap: 10px; padding: 9px 12px;
+  border-radius: 8px; cursor: default;
+  background: var(--panel-2); border: 1px solid var(--line); margin-bottom: 6px;
 }
-.rx-row:hover, .rx-row:focus { background: var(--panel-2); outline: none; }
+.rx-row:hover, .rx-row:focus { background: #232834; outline: none; }
 .rx-row.dir { cursor: pointer; }
 .rx-glyph { flex: none; width: 18px; text-align: center; }
 .rx-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rx-subpath { color: var(--muted); font-size: 11px; margin-inline-start: 6px; }
 .rx-meta { flex: none; color: var(--muted); font-size: 12px; }
 .rx-empty { color: var(--muted); text-align: center; margin-top: 40px; }
+
+.rx-root-wrap { position: relative; display: flex; align-items: center; }
+.rx-root-wrap .rx-root { flex: 1; }
+.rx-root-toggle {
+  position: absolute; inset-inline-end: 4px; border: 0; background: transparent;
+  color: var(--muted); cursor: pointer; font-size: 13px; padding: 2px 6px;
+  border-radius: 5px; opacity: 0;
+}
+.rx-root-wrap:hover .rx-root-toggle,
+.rx-root-wrap:focus-within .rx-root-toggle { opacity: 1; }
+.rx-root-toggle:hover { color: var(--text); background: var(--bg); }
+.rx-nav-divider {
+  color: var(--muted); font-size: 11px; text-transform: uppercase;
+  letter-spacing: .5px; padding: 12px 9px 4px; border-top: 1px solid var(--line);
+  margin-top: 8px;
+}
+.rx-root.hidden-root { opacity: .5; }

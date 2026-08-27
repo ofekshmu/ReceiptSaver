@@ -229,23 +229,66 @@ function humanSize(n) {
   return (i === 0 ? v : v.toFixed(1)) + " " + u[i];
 }
 
+let rxHidden = new Set();
+
+function rxNorm(p) { return (p || "").toLowerCase().replace(/\//g, "\\"); }
+
 async function rxInit() {
   if (rxLoaded) return;
   rxLoaded = true;
+  const st = await api().get_ui_state();
+  rxHidden = new Set((st.hidden_roots || []).map(rxNorm));
   rxRoots = await api().list_roots();
+  rxRenderNav();
+  const firstVisible = rxRoots.find(r => r.exists && !rxHidden.has(rxNorm(r.path)))
+                    || rxRoots.find(r => r.exists) || rxRoots[0];
+  if (firstVisible) rxBrowse(firstVisible.path);
+}
+
+function rxRenderNav() {
   const nav = $(".rx-nav");
   nav.innerHTML = "";
-  rxRoots.forEach(root => {
-    const n = $("#tpl-rx-root").content.cloneNode(true);
-    const btn = n.querySelector(".rx-root");
-    $(".rx-root-label", n).textContent = root.label;
-    if (!root.exists) btn.classList.add("missing");
-    btn.title = root.path;
-    btn.addEventListener("click", () => rxBrowse(root.path));
-    nav.appendChild(n);
+  const visible = rxRoots.filter(r => !rxHidden.has(rxNorm(r.path)));
+  const hidden = rxRoots.filter(r => rxHidden.has(rxNorm(r.path)));
+  visible.forEach(r => nav.appendChild(rxRootEl(r, false)));
+  if (hidden.length) {
+    const d = document.createElement("div");
+    d.className = "rx-nav-divider";
+    d.textContent = "Hidden";
+    nav.appendChild(d);
+    hidden.forEach(r => nav.appendChild(rxRootEl(r, true)));
+  }
+  rxMarkActive();
+}
+
+function rxRootEl(root, isHidden) {
+  const n = $("#tpl-rx-root").content.cloneNode(true);
+  const btn = n.querySelector(".rx-root");
+  const tog = n.querySelector(".rx-root-toggle");
+  $(".rx-root-label", n).textContent = root.label;
+  btn.title = root.path;
+  if (!root.exists) btn.classList.add("missing");
+  if (isHidden) btn.classList.add("hidden-root");
+  btn.addEventListener("click", () => rxBrowse(root.path));
+  tog.textContent = isHidden ? "＋" : "⊘";
+  tog.title = isHidden ? "Unhide this root" : "Hide this root";
+  tog.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    const key = rxNorm(root.path);
+    if (rxHidden.has(key)) rxHidden.delete(key); else rxHidden.add(key);
+    await api().set_ui_state({ hidden_roots: [...rxHidden] });
+    rxRenderNav();
   });
-  const first = rxRoots.find(r => r.exists) || rxRoots[0];
-  if (first) rxBrowse(first.path);
+  n.querySelector(".rx-root-wrap").dataset.path = root.path;
+  return n;
+}
+
+function rxMarkActive() {
+  $$(".rx-root").forEach(btn => {
+    const path = btn.closest(".rx-root-wrap").dataset.path || "";
+    btn.classList.toggle("active",
+      rxCurrent && rxCurrent.toLowerCase().startsWith(path.toLowerCase()));
+  });
 }
 
 async function rxBrowse(path) {
@@ -253,9 +296,7 @@ async function rxBrowse(path) {
   if (res.error && (!res.crumbs || !res.crumbs.length)) { toast(res.error, true); return; }
   rxCurrent = res.path || path;
 
-  $$(".rx-root").forEach((btn, i) => btn.classList.toggle(
-    "active", rxRoots[i] && rxCurrent &&
-    rxCurrent.toLowerCase().startsWith(rxRoots[i].path.toLowerCase())));
+  rxMarkActive();
 
   const trail = $(".rx-crumb-trail");
   trail.innerHTML = "";
