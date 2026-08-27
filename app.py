@@ -155,7 +155,13 @@ def main():
             f.write(f"\n[app.py] pywebview not available: {e}\n")
         raise SystemExit(1)
 
-    api = Api()
+    # RECEIPT_SAVER_UI_DRYRUN=1 boots the window without touching any mailbox —
+    # used to smoke-test the UI. The scan reports "nothing new".
+    if os.environ.get("RECEIPT_SAVER_UI_DRYRUN") == "1":
+        api = Api(scan_fn=lambda run_id, progress_cb: {
+            "run_id": run_id, "saved": 0, "fallback": 0, "excluded": 0, "records": []})
+    else:
+        api = Api()
     window = webview.create_window(
         "Receipt Saver",
         url=str(UI_DIR / "index.html"),
