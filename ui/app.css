@@ -206,7 +206,6 @@ main { flex: 1; overflow: hidden; position: relative; }
 .rx-row.dir { cursor: pointer; }
 .rx-glyph { flex: none; width: 18px; text-align: center; }
 .rx-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.rx-subpath { display: block; color: var(--muted); font-size: 11px; margin-top: 2px; }
 .rx-meta { flex: none; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
 .rx-date { white-space: nowrap; }
 .rx-acct {
@@ -237,4 +236,4 @@ main { flex: 1; overflow: hidden; position: relative; }
   margin: 10px 14px 0; padding: 7px 10px; border-radius: 8px;
   border: 1px solid var(--line); background: var(--panel-2); color: var(--text);
 }
-.rx-searching #rx-open { display: none; }
+.rx-searching #rx-search { border-color: var(--accent); }

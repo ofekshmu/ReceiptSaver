@@ -204,6 +204,9 @@ class Api:
         return ui_state.save(patch or {})
 
     # -- receipts search ------------------------------------------------
+    # NOTE: the Receipts tab now filters only the current folder (client-side
+    # in app.js). This recursive cross-root walk is kept for possible reuse
+    # but is no longer called by the UI.
     def search_receipts(self, query: str, limit: int = 200) -> dict:
         q = (query or "").strip().lower()
         if len(q) < 2:

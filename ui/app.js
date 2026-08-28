@@ -379,6 +379,7 @@ function toast(msg, isError) {
 // ---- Receipts explorer -------------------------------------------------
 let rxRoots = [], rxCurrent = null, rxLoaded = false;
 let rxBackStack = [];
+let rxEntries = [];         // entries of the folder currently shown
 let rxSort = "date_desc";   // <name|date>_<asc|desc>
 const RX_GLYPH = { folder: "📁", "receipt-folder": "🧾", pdf: "📄", file: "▪" };
 
@@ -509,10 +510,9 @@ async function rxBrowse(path, opts = {}) {
     trail.appendChild(b);
   });
 
-  const list = $(".rx-list");
-  list.innerHTML = "";
   const empty = $(".rx-empty");
   if (res.error) {
+    $(".rx-list").innerHTML = "";
     empty.hidden = false;
     if (res.error === "folder not found") {
       empty.textContent = "This folder doesn't exist yet.";
@@ -520,15 +520,46 @@ async function rxBrowse(path, opts = {}) {
       empty.textContent = res.error + " ";
       empty.appendChild(askClaudeButton("Receipts explorer: " + res.error));
     }
+    rxEntries = [];
     return;
   }
-  if (!res.entries.length) {
+  rxEntries = res.entries || [];
+  const q = $("#rx-search");
+  rxRenderList(q && q.value.trim());
+}
+
+// Render the current folder's entries into .rx-list, optionally narrowed to
+// those matching `filter` (case-insensitive substring of name / seller / account).
+function rxRenderList(filter) {
+  const list = $(".rx-list");
+  const empty = $(".rx-empty");
+  list.innerHTML = "";
+
+  const f = (filter || "").toLowerCase();
+  $("#view-receipts").classList.toggle("rx-searching", !!f);
+
+  let entries = rxEntries;
+  if (f) {
+    entries = entries.filter(e => {
+      const p = e.parsed || {};
+      return (e.name || "").toLowerCase().includes(f)
+          || (p.title || "").toLowerCase().includes(f)
+          || (p.account || "").toLowerCase().includes(f);
+    });
+  }
+
+  if (!rxEntries.length) {
     empty.hidden = false;
     empty.textContent = "This folder is empty.";
     return;
   }
+  if (!entries.length) {
+    empty.hidden = false;
+    empty.textContent = `No items in this folder match “${filter}”.`;
+    return;
+  }
   empty.hidden = true;
-  for (const e of rxSortEntries(res.entries)) {
+  for (const e of rxSortEntries(entries)) {
     const { n, row } = rxRowEl(e);
     if (e.is_dir) {
       row.classList.add("dir");
@@ -557,7 +588,7 @@ function rxGoBack() {
   if (prev === undefined) return;
   rxUpdateBackBtn();
   const q = $("#rx-search");
-  if (q && q.value) { q.value = ""; rxExitSearch(); }
+  if (q) q.value = "";
   rxBrowse(prev, { noHistory: true });
 }
 
@@ -600,11 +631,7 @@ async function rxSetSort(next) {
   rxRenderSortBtns();
   try { await api().set_ui_state({ rx_sort: rxSort }); } catch (_) {}
   const q = $("#rx-search");
-  if ($("#view-receipts").classList.contains("rx-searching") && q && q.value.trim().length >= 2) {
-    rxSearch(q.value.trim());
-  } else if (rxCurrent) {
-    rxBrowse(rxCurrent, { noHistory: true });
-  }
+  rxRenderList(q && q.value.trim());
 }
 
 $("#rx-back").addEventListener("click", rxGoBack);
@@ -627,48 +654,8 @@ let rxSearchTimer = 0;
 $("#rx-search").addEventListener("input", e => {
   clearTimeout(rxSearchTimer);
   const q = e.target.value.trim();
-  rxSearchTimer = setTimeout(() => (q.length >= 2 ? rxSearch(q) : rxExitSearch()), 200);
+  rxSearchTimer = setTimeout(() => rxRenderList(q), 120);
 });
-
-async function rxSearch(q) {
-  $("#view-receipts").classList.add("rx-searching");
-  const res = await api().search_receipts(q);
-  const trail = $(".rx-crumb-trail");
-  trail.innerHTML = "";
-  const label = document.createElement("span");
-  label.className = "rx-crumb here";
-  label.textContent = `Search "${q}" — ${res.results.length} result(s)` +
-    (res.truncated ? " (first 200)" : "");
-  trail.appendChild(label);
-
-  const list = $(".rx-list");
-  list.innerHTML = "";
-  const empty = $(".rx-empty");
-  if (!res.results.length) {
-    empty.hidden = false; empty.textContent = "No matches.";
-    return;
-  }
-  empty.hidden = true;
-  for (const e of rxSortEntries(res.results)) {
-    const { n, row } = rxRowEl(e);
-    const sub = document.createElement("span");
-    sub.className = "rx-subpath";
-    sub.textContent = `${e.root_label} / ${e.rel.split(/[\\/]/).slice(0, -1).join(" / ") || "."}`;
-    $(".rx-name", row).appendChild(sub);
-    if (e.is_dir) {
-      row.classList.add("dir");
-      row.addEventListener("click", () => { $("#rx-search").value = ""; rxExitSearch(); rxBrowse(e.path); });
-    } else {
-      row.addEventListener("dblclick", () => api().open_path(e.path));
-    }
-    list.appendChild(n);
-  }
-}
-
-function rxExitSearch() {
-  $("#view-receipts").classList.remove("rx-searching");
-  if (rxCurrent) rxBrowse(rxCurrent);
-}
 
 window.addEventListener("pywebviewready", () => {
   resetRunView();
