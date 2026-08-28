@@ -11,7 +11,7 @@ import threading
 from pathlib import Path
 
 UI_STATE_FILE = Path(r"C:\Users\ofeks\Scripts\ReceiptSaver\ui_state.json")
-DEFAULTS = {"hidden_roots": [], "fallbacks_simple": False}
+DEFAULTS = {"hidden_roots": [], "fallbacks_simple": False, "rx_sort": "date_desc"}
 _LOCK = threading.Lock()
 
 

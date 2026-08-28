@@ -174,6 +174,14 @@ class Api:
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
+    def ask_claude_error(self, message: str) -> dict:
+        """Open a `claude` terminal in the repo, seeded to debug `message`."""
+        try:
+            claude_handoff.launch_error(message or "")
+            return {"ok": True}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
     # -- misc ------------------------------------------------------------
     def open_folder(self, path: str) -> dict:
         try:

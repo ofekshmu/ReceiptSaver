@@ -4,9 +4,11 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import app as appmod
 import history as history_mod
+import claude_handoff
 
 
 class TestApi(unittest.TestCase):
@@ -183,6 +185,39 @@ class TestUiStateApi(unittest.TestCase):
         s = api.get_ui_state()
         self.assertTrue(s["fallbacks_simple"])
         self.assertEqual(s["hidden_roots"], ["c:\\x"])
+
+
+class TestAskClaudeError(unittest.TestCase):
+    def _api(self):
+        return appmod.Api(scan_fn=lambda run_id, progress_cb: {
+            "run_id": run_id, "saved": 0, "fallback": 0, "excluded": 0, "records": []})
+
+    def test_error_prompt_is_single_line_no_double_quotes(self):
+        p = claude_handoff.build_error_prompt('boom "x"\n  at line 5')
+        self.assertNotIn("\n", p)
+        self.assertNotIn('"', p)
+        self.assertIn("Receipt Saver", p)
+        self.assertIn("boom", p)
+
+    def test_error_prompt_truncates_long_message(self):
+        p = claude_handoff.build_error_prompt("z" * 5000)
+        self.assertLess(len(p), 1000)
+        self.assertTrue(p.endswith("..."))
+
+    def test_ask_claude_error_spawns_terminal(self):
+        with mock.patch("claude_handoff.subprocess.Popen") as popen:
+            res = self._api().ask_claude_error("something failed")
+        self.assertTrue(res["ok"])
+        self.assertTrue(popen.called)
+        joined = " ".join(popen.call_args[0][0])
+        self.assertIn("claude", joined)
+        self.assertIn("something failed", joined)
+
+    def test_ask_claude_error_reports_failure(self):
+        with mock.patch("claude_handoff.subprocess.Popen", side_effect=OSError("nope")):
+            res = self._api().ask_claude_error("x")
+        self.assertFalse(res["ok"])
+        self.assertIn("nope", res["error"])
 
 
 class TestSearchReceipts(unittest.TestCase):

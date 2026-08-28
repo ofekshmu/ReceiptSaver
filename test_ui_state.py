@@ -9,7 +9,8 @@ class TestUiState(unittest.TestCase):
 
     def test_load_defaults_when_absent(self):
         s = ui_state.load(path=self.p)
-        self.assertEqual(s, {"hidden_roots": [], "fallbacks_simple": False})
+        self.assertEqual(s, {"hidden_roots": [], "fallbacks_simple": False,
+                             "rx_sort": "date_desc"})
 
     def test_load_defaults_when_corrupt(self):
         self.p.write_text("{bad", encoding="utf-8")

@@ -31,3 +31,22 @@ def launch(entries: list) -> None:
         ["cmd", "/c", "start", "Claude - fallbacks", "cmd", "/k", "claude", prompt],
         cwd=str(SCRIPT_DIR),
     )
+
+
+def build_error_prompt(message: str) -> str:
+    """A one-line debugging prompt seeded with an error the UI surfaced."""
+    msg = " ".join(str(message or "").split()).replace('"', "'")
+    if len(msg) > 800:
+        msg = msg[:800] + " ..."
+    return ("help me debug an error from the Receipt Saver app in this repo. "
+            "Look at the relevant code and receipt_saver.log, then explain the "
+            f"cause and suggest a fix. The error surfaced in the UI was: {msg}")
+
+
+def launch_error(message: str) -> None:
+    """Open a `claude` terminal in the repo, pre-seeded to debug `message`."""
+    prompt = build_error_prompt(message)
+    subprocess.Popen(
+        ["cmd", "/c", "start", "Claude - error", "cmd", "/k", "claude", prompt],
+        cwd=str(SCRIPT_DIR),
+    )

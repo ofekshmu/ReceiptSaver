@@ -135,7 +135,11 @@ window.onScanEvent = function (evt) {
     if (lbl) runSetAccount(lbl, "failed", evt.message);
     const d = document.createElement("div");
     d.className = "toast error";
-    d.textContent = `${evt.label}: ${evt.message}`;
+    const span = document.createElement("span");
+    span.className = "toast-msg";
+    span.textContent = `${evt.label}: ${evt.message}`;
+    d.appendChild(span);
+    d.appendChild(askClaudeButton(`${evt.label}: ${evt.message}`));
     $("#run-list").appendChild(d);
   } else if (evt.type === "done") {
     for (const [label, a] of runAccts) {
@@ -335,16 +339,47 @@ async function refreshBadge(count) {
   b.textContent = count;
   b.hidden = !count;
 }
+// Small Claude-mark button that opens a `claude` terminal in the repo,
+// pre-seeded to debug the given error text.
+function askClaudeButton(errText) {
+  const b = document.createElement("button");
+  b.className = "ask-claude";
+  b.type = "button";
+  b.title = "Ask Claude about this error";
+  b.innerHTML =
+    '<svg viewBox="0 0 24 24" aria-hidden="true" width="13" height="13">' +
+    '<path fill="currentColor" d="M12 1.5l1.9 5.1 5.1 1.9-5.1 1.9L12 15.5l-1.9-5.1L5 8.5l5.1-1.9z' +
+    'M18.5 14l1 2.6 2.6 1-2.6 1-1 2.6-1-2.6-2.6-1 2.6-1z' +
+    'M5 15l.8 2 2 .8-2 .8L5 21.5l-.8-2-2-.8 2-.8z"/></svg>' +
+    '<span>Ask Claude</span>';
+  b.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    b.disabled = true;
+    let res;
+    try { res = await api().ask_claude_error(String(errText || "")); }
+    catch (_) { res = { ok: false }; }
+    toast(res && res.ok ? "Opening Claude…" : "Couldn't open Claude", !(res && res.ok));
+    setTimeout(() => { b.disabled = false; }, 3000);
+  });
+  return b;
+}
+
 function toast(msg, isError) {
   const d = document.createElement("div");
   d.className = "toast" + (isError ? " error" : "");
-  d.textContent = msg;
+  const span = document.createElement("span");
+  span.className = "toast-msg";
+  span.textContent = msg;
+  d.appendChild(span);
+  if (isError) d.appendChild(askClaudeButton(msg));
   $("#toast-host").appendChild(d);
-  setTimeout(() => d.remove(), 4000);
+  setTimeout(() => d.remove(), isError ? 12000 : 4000);
 }
 
 // ---- Receipts explorer -------------------------------------------------
 let rxRoots = [], rxCurrent = null, rxLoaded = false;
+let rxBackStack = [];
+let rxSort = "date_desc";   // <name|date>_<asc|desc>
 const RX_GLYPH = { folder: "📁", "receipt-folder": "🧾", pdf: "📄", file: "▪" };
 
 function humanSize(n) {
@@ -391,6 +426,8 @@ async function rxInit() {
   rxLoaded = true;
   const st = await api().get_ui_state();
   rxHidden = new Set((st.hidden_roots || []).map(rxNorm));
+  if (/^(name|date)_(asc|desc)$/.test(st.rx_sort || "")) rxSort = st.rx_sort;
+  rxRenderSortBtns();
   rxRoots = await api().list_roots();
   rxRenderNav();
   const firstVisible = rxRoots.find(r => r.exists && !rxHidden.has(rxNorm(r.path)))
@@ -444,10 +481,16 @@ function rxMarkActive() {
   });
 }
 
-async function rxBrowse(path) {
+async function rxBrowse(path, opts = {}) {
   const res = await api().browse(path);
   if (res.error && (!res.crumbs || !res.crumbs.length)) { toast(res.error, true); return; }
-  rxCurrent = res.path || path;
+  const next = res.path || path;
+  if (!opts.noHistory && rxCurrent && rxNorm(rxCurrent) !== rxNorm(next)) {
+    rxBackStack.push(rxCurrent);
+    if (rxBackStack.length > 100) rxBackStack.shift();
+  }
+  rxCurrent = next;
+  rxUpdateBackBtn();
 
   rxMarkActive();
 
@@ -471,8 +514,12 @@ async function rxBrowse(path) {
   const empty = $(".rx-empty");
   if (res.error) {
     empty.hidden = false;
-    empty.textContent = res.error === "folder not found"
-      ? "This folder doesn't exist yet." : res.error;
+    if (res.error === "folder not found") {
+      empty.textContent = "This folder doesn't exist yet.";
+    } else {
+      empty.textContent = res.error + " ";
+      empty.appendChild(askClaudeButton("Receipts explorer: " + res.error));
+    }
     return;
   }
   if (!res.entries.length) {
@@ -481,7 +528,7 @@ async function rxBrowse(path) {
     return;
   }
   empty.hidden = true;
-  for (const e of res.entries) {
+  for (const e of rxSortEntries(res.entries)) {
     const { n, row } = rxRowEl(e);
     if (e.is_dir) {
       row.classList.add("dir");
@@ -497,6 +544,83 @@ async function rxBrowse(path) {
 
 $("#rx-open").addEventListener("click", () => {
   if (rxCurrent) api().open_path(rxCurrent);
+});
+
+// ---- explorer: back-history + sort ---------------------------------
+function rxUpdateBackBtn() {
+  const b = $("#rx-back");
+  if (b) b.disabled = rxBackStack.length === 0;
+}
+
+function rxGoBack() {
+  const prev = rxBackStack.pop();
+  if (prev === undefined) return;
+  rxUpdateBackBtn();
+  const q = $("#rx-search");
+  if (q && q.value) { q.value = ""; rxExitSearch(); }
+  rxBrowse(prev, { noHistory: true });
+}
+
+function rxDateKey(e) {
+  const m = /^(\d{4})_(\d{2})_(\d{2})/.exec(e.name || "");
+  if (m) return Date.UTC(+m[1], +m[2] - 1, +m[3]) / 1000;
+  return e.mtime || 0;
+}
+
+function rxSortEntries(list) {
+  const [field, dir] = rxSort.split("_");
+  const sign = dir === "asc" ? 1 : -1;
+  const byName = (a, b) =>
+    a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+  return list.slice().sort((a, b) => {
+    if (!a.is_dir !== !b.is_dir) return a.is_dir ? -1 : 1;   // folders first
+    let cmp;
+    if (field === "name") {
+      cmp = byName(a, b);
+    } else {
+      const d = rxDateKey(a) - rxDateKey(b);
+      cmp = d < 0 ? -1 : d > 0 ? 1 : byName(a, b);
+    }
+    return cmp * sign;
+  });
+}
+
+function rxRenderSortBtns() {
+  const [field, dir] = rxSort.split("_");
+  const fb = $("#rx-sort-field"), db = $("#rx-sort-dir");
+  if (fb) fb.textContent = field === "name" ? "Name" : "Date";
+  if (db) {
+    db.textContent = dir === "asc" ? "↑" : "↓";
+    db.title = dir === "asc" ? "Ascending" : "Descending";
+  }
+}
+
+async function rxSetSort(next) {
+  rxSort = next;
+  rxRenderSortBtns();
+  try { await api().set_ui_state({ rx_sort: rxSort }); } catch (_) {}
+  const q = $("#rx-search");
+  if ($("#view-receipts").classList.contains("rx-searching") && q && q.value.trim().length >= 2) {
+    rxSearch(q.value.trim());
+  } else if (rxCurrent) {
+    rxBrowse(rxCurrent, { noHistory: true });
+  }
+}
+
+$("#rx-back").addEventListener("click", rxGoBack);
+$("#rx-sort-field").addEventListener("click", () => {
+  const [f, d] = rxSort.split("_");
+  rxSetSort((f === "name" ? "date" : "name") + "_" + d);
+});
+$("#rx-sort-dir").addEventListener("click", () => {
+  const [f, d] = rxSort.split("_");
+  rxSetSort(f + "_" + (d === "asc" ? "desc" : "asc"));
+});
+window.addEventListener("keydown", e => {
+  if (e.altKey && e.key === "ArrowLeft" && $("#view-receipts").classList.contains("active")) {
+    e.preventDefault();
+    rxGoBack();
+  }
 });
 
 let rxSearchTimer = 0;
@@ -525,7 +649,7 @@ async function rxSearch(q) {
     return;
   }
   empty.hidden = true;
-  for (const e of res.results) {
+  for (const e of rxSortEntries(res.results)) {
     const { n, row } = rxRowEl(e);
     const sub = document.createElement("span");
     sub.className = "rx-subpath";

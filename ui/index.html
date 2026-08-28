@@ -52,7 +52,12 @@
       <div class="rx-main">
         <input id="rx-search" type="search" placeholder="Search all receipts…" dir="auto">
         <div class="rx-crumbs">
+          <button id="rx-back" title="Back (Alt+←)" disabled>‹ Back</button>
           <div class="rx-crumb-trail"></div>
+          <div class="rx-sort" title="Sort this folder">
+            <button id="rx-sort-field">Date</button>
+            <button id="rx-sort-dir" title="Descending">↓</button>
+          </div>
           <button id="rx-open" title="Open this folder in Windows Explorer">Open in Explorer</button>
         </div>
         <div class="rx-list"></div>
