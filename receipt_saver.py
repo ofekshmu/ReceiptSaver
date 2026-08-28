@@ -620,12 +620,13 @@ def main(run_id: str = None, progress_cb=None):
             emit({"type": "error", "label": label, "message": "credentials file missing"})
             continue
 
+        emit({"type": "connecting", "label": label, "email": account["email"]})
         try:
             service = provider.get_service(account)
         except Exception as e:
             log.error(f"  Auth failed for {label}: {e}")
             notify("⚠️ Receipt Saver", f"שגיאת כניסה לחשבון {label}")
-            emit({"type": "error", "label": label, "message": f"auth failed: {e}"})
+            emit({"type": "error", "label": label, "message": str(e)})
             continue
 
         candidate_ids = provider.list_candidate_ids(service, account, CUSTOM_RULES_FILE)

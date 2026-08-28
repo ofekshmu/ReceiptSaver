@@ -44,8 +44,14 @@ def _build_msal_app(account: dict, cache: msal.SerializableTokenCache):
     )
 
 
-def get_service(account: dict) -> dict:
-    """Authenticate via MSAL device-code flow. Returns {"access_token": str}."""
+def get_service(account: dict, interactive: bool = False) -> dict:
+    """Return {"access_token": str}.
+
+    The automated scan calls this with interactive=False: it only tries the
+    silent (cached / refresh-token) path and raises immediately if that fails,
+    so a stale token can never freeze the scan on MSAL's ~15-minute device-code
+    poll. Run `python outlook_auth.py` (interactive=True) to (re)authorize.
+    """
     cache = msal.SerializableTokenCache()
     token_file = account["token_file"]
     if token_file.exists():
@@ -59,6 +65,11 @@ def get_service(account: dict) -> dict:
         result = app.acquire_token_silent(SCOPES, account=accounts[0])
 
     if not result:
+        if not interactive:
+            raise RuntimeError(
+                f"{account['label']} needs re-authorization — run "
+                f"`python outlook_auth.py` and complete the device-code sign-in"
+            )
         flow = app.initiate_device_flow(scopes=SCOPES)
         if "user_code" not in flow:
             raise RuntimeError(f"Device flow failed: {flow.get('error_description', flow)}")

@@ -130,6 +130,17 @@ class TestExplorerApi(unittest.TestCase):
         self.assertEqual(by["note.pdf"]["size"], 2048)
         self.assertIsNone(by["חשבנות"]["size"])
 
+    def test_browse_parses_folder_name_for_clean_view(self):
+        by = {e["name"]: e for e in self._api().browse(str(self.root))["entries"]}
+        r = by["2026_08_25 - סלקום - חשבונית - ofek"]
+        self.assertEqual(r["title"], "סלקום - חשבונית")
+        self.assertEqual(r["date_display"], "25 Aug 2026")
+        self.assertEqual(r["account"], "ofek")
+        # plain folder / file: title falls back to the raw name, no date/account
+        self.assertEqual(by["חשבנות"]["title"], "חשבנות")
+        self.assertEqual(by["חשבנות"]["date_display"], "")
+        self.assertEqual(by["note.pdf"]["account"], "")
+
     def test_browse_crumbs(self):
         res = self._api().browse(str(self.root / "חשבנות"))
         self.assertEqual([c["name"] for c in res["crumbs"]], ["קבלות", "חשבנות"])

@@ -27,6 +27,36 @@ UI_DIR            = SCRIPT_DIR / "ui"
 FALLBACK_LOG_FILE = SCRIPT_DIR / "fallback_log.json"
 
 _DATED_RE = re.compile(r"^(\d{4})_(\d{2})_(\d{2})")
+_FOLDER_RE = re.compile(r"^(\d{4})_(\d{2})_(\d{2}) - (.*)$")
+_DUP_RE = re.compile(r"( \(\d+\))$")
+_MONTHS = ("", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+           "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+_ACCOUNT_LABELS = tuple(a["label"] for a in receipt_saver.ACCOUNTS)
+
+
+def _parse_folder_name(name: str) -> dict | None:
+    """Split 'YYYY_MM_DD - Seller - Product - label [(n)]' into a clean title,
+    a human date, and the account label. Returns None if the name is not in
+    that shape (plain folders, files)."""
+    m = _FOLDER_RE.match(name)
+    if not m:
+        return None
+    y, mo, d, rest = m.groups()
+    dup = ""
+    md = _DUP_RE.search(rest)
+    if md:
+        dup, rest = md.group(1), rest[: md.start()]
+    account = ""
+    for lbl in _ACCOUNT_LABELS:
+        if rest.endswith(f" - {lbl}"):
+            account, rest = lbl, rest[: -(len(lbl) + 3)]
+            break
+    try:
+        date_display = f"{int(d)} {_MONTHS[int(mo)]} {y}"
+    except (ValueError, IndexError):
+        date_display = f"{y}-{mo}-{d}"
+    return {"title": (rest.strip() + dup) or name,
+            "date_display": date_display, "account": account}
 
 
 def _entry_sort_key(e: dict):
@@ -206,8 +236,12 @@ class Api:
             kind = "pdf"
         else:
             kind = "file"
+        parsed = _parse_folder_name(name) if is_dir else None
         return {"name": name, "path": full, "is_dir": is_dir, "kind": kind,
-                "root_label": root_label, "rel": os.path.relpath(full, root_path)}
+                "root_label": root_label, "rel": os.path.relpath(full, root_path),
+                "title": parsed["title"] if parsed else name,
+                "date_display": parsed["date_display"] if parsed else "",
+                "account": parsed["account"] if parsed else ""}
 
     # -- receipts explorer (read-only) --------------------------------------
     def list_roots(self) -> list:
@@ -258,8 +292,12 @@ class Api:
                 size = st.st_size
         except OSError:
             pass
+        parsed = _parse_folder_name(name) if is_dir else None
         return {"name": name, "path": str(child), "is_dir": is_dir,
-                "kind": kind, "size": size, "mtime": mtime}
+                "kind": kind, "size": size, "mtime": mtime,
+                "title": parsed["title"] if parsed else name,
+                "date_display": parsed["date_display"] if parsed else "",
+                "account": parsed["account"] if parsed else ""}
 
     def browse(self, path: str) -> dict:
         if not receipt_roots.is_within_roots(path):

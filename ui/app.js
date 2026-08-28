@@ -77,22 +77,70 @@ function card(rec) {
 }
 
 // ---- this-run view ----------------------------------------------------
+const runAccts = new Map();  // label -> {state, detail}
+const RA_DOT = { connecting: "◌", scanning: "◌", done: "✓", failed: "⚠" };
+
 function resetRunView() {
   $("#run-list").innerHTML = "";
+  $("#run-accounts").innerHTML = "";
+  runAccts.clear();
   $("#run-summary").textContent = "Scanning…";
   $("#run-empty").hidden = true;
 }
+
+function runSetAccount(label, state, detail) {
+  runAccts.set(label, { state, detail: detail || "" });
+  renderRunAccounts();
+}
+
+function renderRunAccounts() {
+  const host = $("#run-accounts");
+  host.innerHTML = "";
+  for (const [label, a] of runAccts) {
+    const row = document.createElement("div");
+    row.className = `run-acct state-${a.state}`;
+    row.innerHTML =
+      `<span class="ra-dot">${RA_DOT[a.state] || "◌"}</span>` +
+      `<span class="ra-name" dir="auto"></span><span class="ra-detail" dir="auto"></span>`;
+    row.querySelector(".ra-name").textContent = label;
+    row.querySelector(".ra-detail").textContent =
+      a.state === "connecting" ? "connecting…"
+      : a.state === "scanning" ? a.detail
+      : a.state === "done" ? "done"
+      : a.detail;
+    host.appendChild(row);
+  }
+}
+
 window.onScanEvent = function (evt) {
-  if (evt.type === "account") {
-    $("#run-summary").textContent = `Scanning ${evt.label}… ${evt.candidates} candidates`;
+  if (evt.type === "connecting") {
+    runSetAccount(evt.label, "connecting");
+    $("#run-summary").textContent = `Connecting to ${evt.label}…`;
+  } else if (evt.type === "account") {
+    runSetAccount(evt.label, "scanning", `${evt.candidates} to check`);
+    $("#run-summary").textContent = `Scanning ${evt.label}…`;
   } else if (evt.type === "mail") {
     $("#run-list").appendChild(card(evt.record));
+    const label = evt.record && evt.record.account;
+    if (label) {
+      const a = runAccts.get(label) || { hits: 0 };
+      a.hits = (a.hits || 0) + 1;
+      a.state = "scanning";
+      a.detail = `${a.hits} handled`;
+      runAccts.set(label, a);
+      renderRunAccounts();
+    }
   } else if (evt.type === "error") {
+    const lbl = evt.label && evt.label !== "-" ? evt.label : null;
+    if (lbl) runSetAccount(lbl, "failed", evt.message);
     const d = document.createElement("div");
     d.className = "toast error";
     d.textContent = `${evt.label}: ${evt.message}`;
     $("#run-list").appendChild(d);
   } else if (evt.type === "done") {
+    for (const [label, a] of runAccts) {
+      if (a.state === "connecting" || a.state === "scanning") runSetAccount(label, "done");
+    }
     renderRunDone(evt);
   }
 };
@@ -307,6 +355,33 @@ function humanSize(n) {
   return (i === 0 ? v : v.toFixed(1)) + " " + u[i];
 }
 
+// Build one explorer row from a browse/search entry, with the cleaned
+// title, a human date, and an account chip parsed from the folder name.
+function rxRowEl(e) {
+  const n = $("#tpl-rx-row").content.cloneNode(true);
+  const row = n.querySelector(".rx-row");
+  $(".rx-glyph", row).textContent = RX_GLYPH[e.kind] || RX_GLYPH.file;
+  $(".rx-name", row).textContent = e.title || e.name;
+  const meta = $(".rx-meta", row);
+  meta.textContent = "";
+  if (e.date_display) {
+    const d = document.createElement("span");
+    d.className = "rx-date"; d.textContent = e.date_display;
+    meta.appendChild(d);
+  }
+  if (e.account) {
+    const a = document.createElement("span");
+    a.className = "rx-acct"; a.textContent = e.account;
+    meta.appendChild(a);
+  }
+  if (!e.is_dir && e.size != null) {
+    const s = document.createElement("span");
+    s.className = "rx-size"; s.textContent = humanSize(e.size);
+    meta.appendChild(s);
+  }
+  return { n, row };
+}
+
 let rxHidden = new Set();
 
 function rxNorm(p) { return (p || "").toLowerCase().replace(/\//g, "\\"); }
@@ -407,11 +482,7 @@ async function rxBrowse(path) {
   }
   empty.hidden = true;
   for (const e of res.entries) {
-    const n = $("#tpl-rx-row").content.cloneNode(true);
-    const row = n.querySelector(".rx-row");
-    $(".rx-glyph", n).textContent = RX_GLYPH[e.kind] || RX_GLYPH.file;
-    $(".rx-name", n).textContent = e.name;
-    $(".rx-meta", n).textContent = e.is_dir ? "" : humanSize(e.size);
+    const { n, row } = rxRowEl(e);
     if (e.is_dir) {
       row.classList.add("dir");
       row.addEventListener("click", () => rxBrowse(e.path));
@@ -455,15 +526,11 @@ async function rxSearch(q) {
   }
   empty.hidden = true;
   for (const e of res.results) {
-    const n = $("#tpl-rx-row").content.cloneNode(true);
-    const row = n.querySelector(".rx-row");
-    $(".rx-glyph", n).textContent = RX_GLYPH[e.kind] || RX_GLYPH.file;
-    $(".rx-name", n).textContent = e.name;
+    const { n, row } = rxRowEl(e);
     const sub = document.createElement("span");
     sub.className = "rx-subpath";
-    sub.textContent = `${e.root_label} / ${e.rel}`;
-    $(".rx-name", n).appendChild(sub);
-    $(".rx-meta", n).textContent = "";
+    sub.textContent = `${e.root_label} / ${e.rel.split(/[\\/]/).slice(0, -1).join(" / ") || "."}`;
+    $(".rx-name", row).appendChild(sub);
     if (e.is_dir) {
       row.classList.add("dir");
       row.addEventListener("click", () => { $("#rx-search").value = ""; rxExitSearch(); rxBrowse(e.path); });

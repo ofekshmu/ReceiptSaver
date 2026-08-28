@@ -37,6 +37,17 @@ main { flex: 1; overflow: hidden; position: relative; }
 .view.active { display: block; }
 
 .summary { color: var(--muted); margin-bottom: 12px; min-height: 18px; }
+
+#run-accounts { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+#run-accounts:empty { display: none; }
+.run-acct { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.run-acct .ra-dot { flex: none; width: 14px; text-align: center; }
+.run-acct .ra-name { color: var(--text); min-width: 64px; }
+.run-acct.state-done .ra-dot { color: var(--ok); }
+.run-acct.state-failed .ra-dot { color: var(--bad); }
+.run-acct.state-failed .ra-detail { color: var(--warn); }
+.run-acct.state-connecting .ra-dot,
+.run-acct.state-scanning  .ra-dot { color: var(--accent); }
 .cards { display: flex; flex-direction: column; gap: 8px; }
 .card {
   display: flex; align-items: center; gap: 12px; padding: 12px 14px;
@@ -167,8 +178,14 @@ main { flex: 1; overflow: hidden; position: relative; }
 .rx-row.dir { cursor: pointer; }
 .rx-glyph { flex: none; width: 18px; text-align: center; }
 .rx-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.rx-subpath { color: var(--muted); font-size: 11px; margin-inline-start: 6px; }
-.rx-meta { flex: none; color: var(--muted); font-size: 12px; }
+.rx-subpath { display: block; color: var(--muted); font-size: 11px; margin-top: 2px; }
+.rx-meta { flex: none; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
+.rx-date { white-space: nowrap; }
+.rx-acct {
+  background: var(--bg); border: 1px solid var(--line); border-radius: 5px;
+  padding: 1px 6px; font-size: 11px; color: var(--muted);
+}
+.rx-size { white-space: nowrap; }
 .rx-empty { color: var(--muted); text-align: center; margin-top: 40px; }
 
 .rx-root-wrap { position: relative; display: flex; align-items: center; }

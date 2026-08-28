@@ -1,4 +1,8 @@
 import unittest
+from pathlib import Path
+from unittest import mock
+
+import outlook_provider
 from outlook_provider import _is_relevant
 
 
@@ -20,6 +24,27 @@ class TestIsRelevant(unittest.TestCase):
 
     def test_matching_is_case_insensitive(self):
         self.assertTrue(_is_relevant("BILLING@STERNUM-SEC.COM", "INVOICE for July", True, []))
+
+
+class TestGetServiceNonInteractive(unittest.TestCase):
+    """The automated scan must never fall into MSAL's ~15-minute device-code
+    poll: with no usable cached token, get_service(interactive=False) raises
+    at once instead of calling the device flow."""
+
+    def _account(self):
+        return {"label": "sternum", "email": "x@sternum-sec.com",
+                "token_file": Path("does-not-exist.json"),
+                "creds_file": Path("does-not-exist.json")}
+
+    def test_raises_without_device_flow_when_silent_fails(self):
+        stub_app = mock.Mock()
+        stub_app.get_accounts.return_value = []
+        stub_app.acquire_token_silent.return_value = None
+        with mock.patch.object(outlook_provider, "_build_msal_app", return_value=stub_app):
+            with self.assertRaises(RuntimeError) as ctx:
+                outlook_provider.get_service(self._account(), interactive=False)
+        self.assertIn("re-authorization", str(ctx.exception))
+        stub_app.initiate_device_flow.assert_not_called()
 
 
 if __name__ == "__main__":
