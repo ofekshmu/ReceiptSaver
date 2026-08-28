@@ -229,13 +229,42 @@ $("#fb-viewtoggle").addEventListener("click", async () => {
   loadFallbacks();
 });
 
+// Per-entry "Claude" button — opens a `claude` terminal seeded with just this
+// one fallback (same handoff path as the multi-select button, list of one).
+function fallbackClaudeButton(it) {
+  const b = document.createElement("button");
+  b.className = "ask-claude";
+  b.type = "button";
+  b.title = "Handle this fallback with Claude";
+  b.innerHTML =
+    '<svg viewBox="0 0 24 24" aria-hidden="true" width="13" height="13">' +
+    '<path fill="currentColor" d="M12 1.5l1.9 5.1 5.1 1.9-5.1 1.9L12 15.5l-1.9-5.1L5 8.5l5.1-1.9z' +
+    'M18.5 14l1 2.6 2.6 1-2.6 1-1 2.6-1-2.6-2.6-1 2.6-1z' +
+    'M5 15l.8 2 2 .8-2 .8L5 21.5l-.8-2-2-.8 2-.8z"/></svg>' +
+    '<span>Claude</span>';
+  b.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    b.disabled = true;
+    let res;
+    try { res = await api().handoff([it.message_id]); }
+    catch (_) { res = { ok: false }; }
+    toast(res && res.ok ? "Opening Claude…" : (res && res.error) || "Couldn't open Claude",
+          !(res && res.ok));
+    setTimeout(() => { b.disabled = false; }, 3000);
+  });
+  return b;
+}
+
 function fbHeader(scope, it) {
   $(".card-title", scope).textContent = it.subject || "(no subject)";
   $(".card-sub", scope).textContent =
     `${it.sender} · ${it.account} · ${(it.date || "").replace(/_/g, "-")}`;
-  $(".open-folder", scope).addEventListener("click", e => {
+  const of = $(".open-folder", scope);
+  of.addEventListener("click", e => {
     e.preventDefault(); api().open_folder(it.folder_path);
   });
+  of.after(fallbackClaudeButton(it));
   $(".fb-check", scope).addEventListener("change", updateHandoffButton);
 }
 
