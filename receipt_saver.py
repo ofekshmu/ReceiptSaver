@@ -343,12 +343,28 @@ def save_email_pdf(body_html: str, folder: Path,
 # CUSTOM RULES  (managed via chat with Claude)
 # ══════════════════════════════════════════════════════════════════════════
 
+CATEGORIES_FILE     = SCRIPT_DIR / "categories.json"
+LEGACY_RULES_FILE   = SCRIPT_DIR / "custom_rules.legacy.json"
+
+
 def load_custom_rules() -> list:
-    if CUSTOM_RULES_FILE.exists():
-        try:
-            return json.loads(CUSTOM_RULES_FILE.read_text(encoding="utf-8"))
-        except Exception as e:
-            log.warning(f"Could not load custom_rules.json: {e}")
+    """Sender-matching rules, newest source first:
+      1. categories.json (flattened to the legacy dict shape) — current format
+      2. custom_rules.json / custom_rules.legacy.json — pre-migration fallback
+    `match_custom()` and the providers' query builders iterate whatever this
+    returns; the shape and ordering are identical either way."""
+    try:
+        import categories
+        if CATEGORIES_FILE.exists():
+            return categories.to_legacy_rules()
+    except Exception as e:
+        log.warning(f"Could not load categories.json: {e}")
+    for f in (CUSTOM_RULES_FILE, LEGACY_RULES_FILE):
+        if f.exists():
+            try:
+                return json.loads(f.read_text(encoding="utf-8"))
+            except Exception as e:
+                log.warning(f"Could not load {f.name}: {e}")
     return []
 
 def match_custom(sender: str, subject: str, body: str = ""):

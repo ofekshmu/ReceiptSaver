@@ -1,0 +1,529 @@
+[
+  {
+    "id": "cat-מקסברנר",
+    "name": "מקס ברנר",
+    "seller": "מקס ברנר",
+    "product": "חשבונית",
+    "base_dir": null,
+    "subfolder": null,
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "morning.co",
+        "subject_contains": "מקס ברנר"
+      }
+    ],
+    "_comment": "מקס ברנר — receipts via morning.co billing platform"
+  },
+  {
+    "id": "cat-שירותהתשלומי",
+    "name": "שירות התשלומים הממשלתי",
+    "seller": "שירות התשלומים הממשלתי",
+    "product": "תשלום",
+    "base_dir": null,
+    "subfolder": null,
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "ecom.gov.il"
+      }
+    ],
+    "_comment": "שירות התשלומים הממשלתי — government payments"
+  },
+  {
+    "id": "haifa-muni-il",
+    "name": "haifa.muni.il",
+    "seller": null,
+    "product": null,
+    "base_dir": null,
+    "subfolder": null,
+    "exclude": true,
+    "match": [
+      {
+        "sender_contains": "haifa.muni.il",
+        "subject_contains": "שובר תשלום"
+      }
+    ],
+    "_comment": "עיריית חיפה — exclude payment voucher notices (not receipts)"
+  },
+  {
+    "id": "baby-land",
+    "name": "Baby Land",
+    "seller": "Baby Land",
+    "product": "חשבונית",
+    "base_dir": null,
+    "subfolder": null,
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "tranzila.com",
+        "subject_contains": "baby-land"
+      }
+    ],
+    "_comment": "Baby Land — receipts via Tranzila payment platform"
+  },
+  {
+    "id": "iec-co-il",
+    "name": "iec.co.il",
+    "seller": null,
+    "product": null,
+    "base_dir": null,
+    "subfolder": null,
+    "exclude": true,
+    "match": [
+      {
+        "sender_contains": "iec.co.il",
+        "subject_contains": "אישור הפעלת שירות"
+      }
+    ],
+    "_comment": "חברת חשמל IEC — exclude service activation notices (not receipts)"
+  },
+  {
+    "id": "on-ev",
+    "name": "on-ev",
+    "seller": "on-ev",
+    "product": "טעינה חשמלית",
+    "base_dir": null,
+    "subfolder": null,
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "mg.driivz.com"
+      }
+    ],
+    "_comment": "on-ev — EV charging invoices (via driivz platform)"
+  },
+  {
+    "id": "interactive-broker",
+    "name": "Interactive Broker",
+    "seller": "Interactive Broker",
+    "product": "אישור הפקדה",
+    "base_dir": null,
+    "subfolder": "Interactive Broker",
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "inter-il.com"
+      }
+    ],
+    "_comment": "Interactive Broker — deposit confirmations"
+  },
+  {
+    "id": "cat-עירייתראשוןל",
+    "name": "עיריית ראשון לציון",
+    "seller": "עיריית ראשון לציון",
+    "product": "אישור תשלום",
+    "base_dir": null,
+    "subfolder": "חשבנות/ארנונה",
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "ladpc.co.il"
+      }
+    ],
+    "_comment": "עיריית ראשון לציון — ביט תשלומים"
+  },
+  {
+    "id": "cat-עירייתחיפה",
+    "name": "עיריית חיפה",
+    "seller": "עיריית חיפה",
+    "product": "קבלת תשלום",
+    "base_dir": "C:\\Users\\ofeks\\OneDrive\\Documents\\נכסים\\שלום שבאזי 7",
+    "subfolder": "חשבנות/ארנונה",
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "חיפה"
+      }
+    ],
+    "_comment": "עיריית חיפה — ארנונה שלום שבאזי 7 (citypay platform, Haifa sender)"
+  },
+  {
+    "id": "cat-ראשוןלציוןהח",
+    "name": "ראשון לציון החברה לב",
+    "seller": "ראשון לציון החברה לב",
+    "product": "קבלת תשלום",
+    "base_dir": null,
+    "subfolder": "חשבנות/ארנונה",
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "ראשון לציון"
+      }
+    ],
+    "_comment": "ראשון לציון החברה לב — ארנונה (citypay platform)"
+  },
+  {
+    "id": "cat-יפנולוגי",
+    "name": "יפנולוגי",
+    "seller": "יפנולוגי",
+    "product": "חשבונית מס קבלה",
+    "base_dir": null,
+    "subfolder": "יפנולוגי",
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "icount.co.il",
+        "subject_contains": "יפנולוגי"
+      }
+    ],
+    "_comment": "iCount invoicing platform — יפנולוגי"
+  },
+  {
+    "id": "cat-אלקטרהפאוור",
+    "name": "אלקטרה פאוור",
+    "seller": "אלקטרה פאוור",
+    "product": "חשבונית חשמל",
+    "base_dir": null,
+    "subfolder": "חשבנות/חשמל",
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "electra-power.co.il"
+      }
+    ],
+    "_comment": "אלקטרה פאוור — חשבונית חשמל"
+  },
+  {
+    "id": "cat-פזגז",
+    "name": "פזגז",
+    "seller": "פזגז",
+    "product": "חשבונית גז",
+    "base_dir": null,
+    "subfolder": "חשבנות/גז",
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "printernet.co.il",
+        "subject_contains": "פזגז"
+      }
+    ],
+    "_comment": "פזגז — חשבונית גז"
+  },
+  {
+    "id": "cat-אלעל",
+    "name": "אל על",
+    "seller": "אל על",
+    "product": "כרטיס טיסה",
+    "base_dir": null,
+    "subfolder": null,
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "elalinfo.co.il"
+      }
+    ],
+    "_comment": "אל על — כרטיסי טיסה"
+  },
+  {
+    "id": "anthropic",
+    "name": "Anthropic",
+    "seller": "Anthropic",
+    "product": "Claude Pro מנוי",
+    "base_dir": null,
+    "subfolder": null,
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "mail.anthropic.com"
+      }
+    ],
+    "_comment": "Anthropic — Claude Pro monthly subscription"
+  },
+  {
+    "id": "ace",
+    "name": "ACE",
+    "seller": "ACE",
+    "product": "הזמנה",
+    "base_dir": null,
+    "subfolder": null,
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "ace.co.il"
+      }
+    ],
+    "_comment": "ACE — hardware store receipts"
+  },
+  {
+    "id": "webmaster-icmega-org",
+    "name": "webmaster@icmega.org",
+    "seller": null,
+    "product": null,
+    "base_dir": null,
+    "subfolder": null,
+    "exclude": true,
+    "match": [
+      {
+        "sender_contains": "webmaster@icmega.org"
+      }
+    ],
+    "_comment": "HEVER WebMaster — promotional newsletters, not receipts"
+  },
+  {
+    "id": "cat-חבר",
+    "name": "חבר",
+    "seller": "חבר",
+    "product": "הזמנה",
+    "base_dir": null,
+    "subfolder": null,
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "icmega.org",
+        "exclude_subject_contains": "פרסומת",
+        "body_contains": "מספר הזמנה",
+        "product_body_regex": "שם הפריט[^\\n]+\\n([^\\n]+)"
+      }
+    ],
+    "_comment": "חבר (HEVER) — אישורי הזמנה בלבד (body must contain מספר הזמנה)"
+  },
+  {
+    "id": "cat-אבירספורט",
+    "name": "אביר ספורט",
+    "seller": "אביר ספורט",
+    "product": "כדור פיזיו",
+    "base_dir": null,
+    "subfolder": null,
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "abirsport.co.il"
+      }
+    ],
+    "_comment": "אביר ספורט — חשבוניות מס/קבלה"
+  },
+  {
+    "id": "upapp",
+    "name": "upapp",
+    "seller": "upapp",
+    "product": "כניסה לחדר כושר אייקון",
+    "base_dir": null,
+    "subfolder": null,
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "hyp.co.il",
+        "subject_contains": "upapp"
+      }
+    ],
+    "_comment": "upapp — כניסה לחדר כושר אייקון (hyp.co.il is a shared payment platform used by many merchants; subject must contain 'upapp' or other senders on hyp.co.il get mislabeled as the gym — see 2026_08_11 איכילוב WELL incident)"
+  },
+  {
+    "id": "cat-חברתחשמללישר",
+    "name": "חברת חשמל לישראל",
+    "seller": "חברת חשמל לישראל",
+    "product": "חשבונית חשמל",
+    "base_dir": "C:\\Users\\ofeks\\OneDrive\\Documents\\נכסים\\שלום שבאזי 7",
+    "subfolder": "חשבנות/חשמל",
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "iec.co.il",
+        "subject_contains": "349305852"
+      }
+    ],
+    "_comment": "חברת חשמל לישראל (IEC) — חוזה 349305852 שייך לנכס שלום שבאזי 7, לא לבית"
+  },
+  {
+    "id": "cat-חברתחשמללישר-2",
+    "name": "חברת חשמל לישראל",
+    "seller": "חברת חשמל לישראל",
+    "product": "חשבונית חשמל",
+    "base_dir": null,
+    "subfolder": "חשבנות/חשמל",
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "iec.co.il"
+      }
+    ],
+    "_comment": "חברת חשמל לישראל (IEC) — חשבוניות חשמל בפועל (לא הודעות הפעלת שירות)"
+  },
+  {
+    "id": "7",
+    "name": "שלום שבאזי 7",
+    "seller": "שלום שבאזי 7",
+    "product": "חשבון",
+    "base_dir": "C:\\Users\\ofeks\\OneDrive\\Documents\\נכסים\\שלום שבאזי 7",
+    "subfolder": null,
+    "exclude": false,
+    "match": [
+      {
+        "subject_contains": "349305852"
+      }
+    ],
+    "_comment": "חוזה 349305852 (נכס שלום שבאזי 7) — קליטת חשבונות עתידיים מכל ספק (מים/גז/וכו')"
+  },
+  {
+    "id": "cat-קבוצתברסרוסי",
+    "name": "קבוצת בר סרוסי",
+    "seller": "קבוצת בר סרוסי",
+    "product": "חשבונית",
+    "base_dir": "C:\\Users\\ofeks\\OneDrive\\Documents\\נכסים",
+    "subfolder": null,
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "morning.co",
+        "subject_contains": "בר סרוסי"
+      }
+    ],
+    "_comment": "קבוצת בר סרוסי — receipts via morning.co billing platform, property-related"
+  },
+  {
+    "id": "cat-אמריקןדיגיטק",
+    "name": "אמריקן דיגיטקס",
+    "seller": "אמריקן דיגיטקס",
+    "product": "חשבונית",
+    "base_dir": null,
+    "subfolder": null,
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "morning.co",
+        "subject_contains": "אמריקן דיגיטקס"
+      }
+    ],
+    "_comment": "אמריקן דיגיטקס — receipts via morning.co billing platform"
+  },
+  {
+    "id": "planet-cinema",
+    "name": "Planet Cinema",
+    "seller": "Planet Cinema",
+    "product": "כרטיסים",
+    "base_dir": null,
+    "subfolder": null,
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "planetcinema.co.il"
+      }
+    ],
+    "_comment": "Planet Cinema — אישורי הזמנת כרטיסים"
+  },
+  {
+    "id": "cat-גןילדיםדיסני",
+    "name": "גן ילדים דיסני ראשון",
+    "seller": "גן ילדים דיסני ראשון",
+    "product": "שכר לימוד",
+    "base_dir": null,
+    "subfolder": null,
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "smartbee.co.il"
+      }
+    ],
+    "_comment": "גן ילדים דיסני ראשון — חשבוניות/קבלות שכר לימוד (via smartbee.co.il)"
+  },
+  {
+    "id": "cat-צהל",
+    "name": "צה״ל",
+    "seller": "צה״ל",
+    "product": "אישור מילואים",
+    "base_dir": "C:\\Users\\ofeks\\OneDrive\\Ofek\\Documents\\צבא\\מילואים",
+    "subfolder": null,
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "miluim.idf.il"
+      }
+    ],
+    "_comment": "צה״ל — טופס אישור ימי מילואים, לא קבלה אך נשמר לתיעוד"
+  },
+  {
+    "id": "cat-משכורת",
+    "name": "משכורת",
+    "seller": "משכורת",
+    "product": "תלוש שכר",
+    "base_dir": "C:\\Users\\ofeks\\OneDrive\\Ofek\\Work\\Sternum\\משכורות",
+    "subfolder": null,
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "billing@sternum-sec.com",
+        "body_contains": "תלוש שכר",
+        "product_body_regex": "(תלוש שכר לחודש \\S+ \\d{4})"
+      }
+    ],
+    "_comment": "Sternum payslip (billing@sternum-sec.com)"
+  },
+  {
+    "id": "sternum-sec-com",
+    "name": "sternum-sec.com",
+    "seller": null,
+    "product": null,
+    "base_dir": null,
+    "subfolder": null,
+    "exclude": true,
+    "match": [
+      {
+        "sender_contains": "sternum-sec.com"
+      }
+    ],
+    "_comment": "auto-added from fallback 19fd66271a093e48"
+  },
+  {
+    "id": "sonol-evi",
+    "name": "Sonol evi",
+    "seller": "Sonol evi",
+    "product": "חשבונית",
+    "base_dir": null,
+    "subfolder": null,
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "sonolevi.co.il",
+        "subject_contains": "טעינת רכב"
+      }
+    ],
+    "_comment": "auto-added from fallback 19fe09a7e38b7f20"
+  },
+  {
+    "id": "cat-סופרפארם",
+    "name": "סופר פארם",
+    "seller": "סופר פארם",
+    "product": "חשבונית",
+    "base_dir": null,
+    "subfolder": null,
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "super-pharm.co.il"
+      }
+    ],
+    "_comment": "auto-added from fallback 19ffcce394715990"
+  },
+  {
+    "id": "cat-מחסניחשמל",
+    "name": "מחסני חשמל",
+    "seller": "מחסני חשמל",
+    "product": "הזמנה",
+    "base_dir": null,
+    "subfolder": null,
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "payngo.co.il",
+        "body_contains": "מחסני חשמל"
+      }
+    ],
+    "_comment": "מחסני חשמל — payngo.co.il / sales@payngo.co.il is a shared Matrix (Tafnit) mail platform used by many retailers, so the sender alone does NOT identify the seller. Confirm the seller by requiring the string 'מחסני חשמל' in the mail body. PDF attachment is the actual tax receipt."
+  },
+  {
+    "id": "mac-org-il",
+    "name": "mac.org.il",
+    "seller": null,
+    "product": null,
+    "base_dir": null,
+    "subfolder": null,
+    "exclude": true,
+    "match": [
+      {
+        "sender_contains": "mac.org.il"
+      }
+    ],
+    "_comment": "auto-added from fallback 19fef81b769c5311"
+  }
+]

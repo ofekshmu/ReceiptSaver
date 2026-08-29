@@ -26,21 +26,32 @@ GMAIL_SUBJECT_KEYWORDS = (
 )
 
 
+def _rules_for_query(custom_rules_file: Path) -> list:
+    """Legacy custom_rules.json if present, else categories.json flattened."""
+    try:
+        data = json.loads(Path(custom_rules_file).read_text(encoding="utf-8"))
+        if isinstance(data, list) and data:
+            return data
+    except Exception:
+        pass
+    try:
+        import categories
+        return categories.to_legacy_rules()
+    except Exception:
+        return []
+
+
 def build_gmail_query(custom_rules_file: Path) -> str:
     """Build Gmail search query, adding from: exceptions for domain-based custom rules."""
     base = f'-in:sent -subject:פרסומת newer_than:60d ((has:attachment AND ({GMAIL_SUBJECT_KEYWORDS}))'
-    try:
-        rules = json.loads(custom_rules_file.read_text(encoding="utf-8"))
-        for rule in rules:
-            sender  = rule.get("match_sender_contains", "") or ""
-            exclude = rule.get("exclude_subject_contains", "") or ""
-            if "." in sender:  # domain-based match (e.g. icmega.org)
-                clause = f"from:{sender}"
-                if exclude:
-                    clause = f"({clause} -subject:{exclude})"
-                base += f" OR {clause}"
-    except Exception:
-        pass
+    for rule in _rules_for_query(custom_rules_file):
+        sender  = rule.get("match_sender_contains", "") or ""
+        exclude = rule.get("exclude_subject_contains", "") or ""
+        if "." in sender:  # domain-based match (e.g. icmega.org)
+            clause = f"from:{sender}"
+            if exclude:
+                clause = f"({clause} -subject:{exclude})"
+            base += f" OR {clause}"
     base += ' OR (has:attachment AND subject:"סיכום שיעור יפנית")'
     return base + ")"
 

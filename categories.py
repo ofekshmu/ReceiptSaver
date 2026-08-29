@@ -130,6 +130,38 @@ def match_category(sender: str, subject: str = "", body: str = "",
     return None
 
 
+def to_legacy_rules(categories: list = None) -> list:
+    """Flatten categories back into the old `custom_rules.json` dict shape — one
+    rule per `match[]` entry, category order then entry order preserved. Lets
+    `receipt_saver.match_custom()` and the providers' query builders keep working
+    unchanged (they iterate this list; first match wins, identically)."""
+    cats = categories if categories is not None else load_categories()
+    rules = []
+    for cat in cats:
+        for m in cat.get("match", []):
+            rule = {}
+            if m.get("sender_contains"):
+                rule["match_sender_contains"] = m["sender_contains"]
+            if m.get("subject_contains"):
+                rule["match_subject_contains"] = m["subject_contains"]
+            if m.get("exclude_subject_contains"):
+                rule["exclude_subject_contains"] = m["exclude_subject_contains"]
+            if m.get("body_contains"):
+                rule["match_body_contains"] = m["body_contains"]
+            if m.get("product_body_regex"):
+                rule["product_body_regex"] = m["product_body_regex"]
+            if cat.get("exclude"):
+                rule["exclude"] = True
+            else:
+                rule["seller"] = cat.get("seller")
+                rule["product"] = cat.get("product")
+                rule["category"] = cat.get("subfolder")
+                if cat.get("base_dir"):
+                    rule["base_dir"] = cat["base_dir"]
+            rules.append(rule)
+    return rules
+
+
 def sender_fragments(categories: list = None) -> list:
     """Every non-empty `sender_contains` across all non-exclude categories —
     used to build the mailbox search query (was: custom-rule senders)."""

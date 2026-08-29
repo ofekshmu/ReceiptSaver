@@ -86,11 +86,23 @@ def get_service(account: dict, interactive: bool = False) -> dict:
     return {"access_token": result["access_token"]}
 
 
-def _custom_rule_domains(custom_rules_file: Path) -> list:
+def _rules_for_query(custom_rules_file: Path) -> list:
+    """Legacy custom_rules.json if present, else categories.json flattened."""
     try:
-        rules = json.loads(custom_rules_file.read_text(encoding="utf-8"))
+        data = json.loads(Path(custom_rules_file).read_text(encoding="utf-8"))
+        if isinstance(data, list) and data:
+            return data
+    except Exception:
+        pass
+    try:
+        import categories
+        return categories.to_legacy_rules()
     except Exception:
         return []
+
+
+def _custom_rule_domains(custom_rules_file: Path) -> list:
+    rules = _rules_for_query(custom_rules_file)
     domains = []
     for rule in rules:
         sender = rule.get("match_sender_contains", "") or ""

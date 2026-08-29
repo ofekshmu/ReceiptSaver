@@ -66,6 +66,43 @@ class TestUpappRule(unittest.TestCase):
         self.assertIsNone(result)
 
 
+class TestRulesSourcedFromCategories(unittest.TestCase):
+    """load_custom_rules() prefers categories.json; match_custom() routes through it."""
+
+    def setUp(self):
+        import json, categories
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.cats_file = self.tmp / "categories.json"
+        self.cats_file.write_text(json.dumps([
+            {"id": "elec", "name": "חשמל", "seller": "חח\"י", "product": "חשבונית חשמל",
+             "base_dir": None, "subfolder": "חשבנות/חשמל",
+             "match": [{"sender_contains": "iectest.co.il"}]},
+            {"id": "promoblock", "name": "promo", "exclude": True,
+             "match": [{"sender_contains": "spam.example",
+                        "subject_contains": "מבצע"}]},
+        ], ensure_ascii=False), encoding="utf-8")
+        self._orig = receipt_saver.CATEGORIES_FILE
+        receipt_saver.CATEGORIES_FILE = self.cats_file
+        categories.CATEGORIES_FILE = self.cats_file
+        self.addCleanup(setattr, receipt_saver, "CATEGORIES_FILE", self._orig)
+        self.addCleanup(setattr, categories, "CATEGORIES_FILE", categories.SCRIPT_DIR / "categories.json")
+
+    def test_load_custom_rules_flattens_categories(self):
+        rules = receipt_saver.load_custom_rules()
+        self.assertEqual(rules[0]["match_sender_contains"], "iectest.co.il")
+        self.assertEqual(rules[0]["seller"], "חח\"י")
+        self.assertEqual(rules[0]["category"], "חשבנות/חשמל")
+
+    def test_match_custom_routes_via_categories(self):
+        seller, product, sub, base = match_custom("bill@iectest.co.il", "any")
+        self.assertEqual((seller, product, sub, base), ("חח\"י", "חשבונית חשמל", "חשבנות/חשמל", None))
+
+    def test_match_custom_exclude_via_categories(self):
+        self.assertEqual(match_custom("x@spam.example", "מבצע ענק")[0], "__exclude__")
+        self.assertIsNone(match_custom("x@spam.example", "חשבונית"))
+
+
 class TestUniqueFolder(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())

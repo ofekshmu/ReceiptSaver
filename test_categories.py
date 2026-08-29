@@ -123,5 +123,35 @@ class TestLoadSaveSlug(unittest.TestCase):
         self.assertEqual(len(frags), len(set(frags)))
 
 
+class TestToLegacyRules(unittest.TestCase):
+    def test_one_rule_per_match_entry_order_preserved(self):
+        rules = C.to_legacy_rules(CATS)
+        # electricity category has 2 match entries -> 2 rules, both first
+        self.assertEqual(rules[0]["match_sender_contains"], "iec.co.il")
+        self.assertEqual(rules[1]["match_sender_contains"], "electra-power.co.il")
+        self.assertEqual(rules[0]["seller"], "חברת חשמל לישראל")
+        self.assertEqual(rules[0]["category"], "חשבנות/חשמל")
+
+    def test_exclude_category_yields_exclude_rule_without_seller(self):
+        rules = C.to_legacy_rules(CATS)
+        haifa = next(r for r in rules if r.get("match_sender_contains") == "haifa.muni.il")
+        self.assertTrue(haifa["exclude"])
+        self.assertNotIn("seller", haifa)
+
+    def test_base_dir_only_when_set(self):
+        rules = C.to_legacy_rules(CATS)
+        sw7 = next(r for r in rules if r["match_sender_contains"] == "billing@sw7.com")
+        self.assertTrue(sw7["base_dir"].endswith("שלום שבאזי 7"))
+        iec = next(r for r in rules if r["match_sender_contains"] == "iec.co.il")
+        self.assertNotIn("base_dir", iec)
+
+    def test_regex_and_negative_gate_carried(self):
+        rules = C.to_legacy_rules(CATS)
+        rgx = next(r for r in rules if r["match_sender_contains"] == "regex.com")
+        self.assertEqual(rgx["product_body_regex"], r"Order #(\d+)")
+        shop = next(r for r in rules if r["match_sender_contains"] == "shop.example")
+        self.assertEqual(shop["exclude_subject_contains"], "פרסומת")
+
+
 if __name__ == "__main__":
     unittest.main()

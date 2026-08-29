@@ -42,10 +42,21 @@ def discover_roots(rules_path: Path = None) -> list:
     for label, path in _FIXED:
         add(label, path)
 
-    try:
-        rules = json.loads(Path(rules_path).read_text(encoding="utf-8"))
-    except Exception:
-        rules = []
+    # base_dir routes come from categories.json (current) or custom_rules.json
+    # (pre-migration). Prefer categories unless an explicit rules_path was given.
+    rules = None
+    if rules_path is None or Path(rules_path) == CUSTOM_RULES_FILE:
+        try:
+            import categories
+            if categories.CATEGORIES_FILE.exists():
+                rules = categories.to_legacy_rules()
+        except Exception:
+            rules = None
+    if rules is None:
+        try:
+            rules = json.loads(Path(rules_path or CUSTOM_RULES_FILE).read_text(encoding="utf-8"))
+        except Exception:
+            rules = []
     for rule in rules:
         bd = rule.get("base_dir")
         if bd:
