@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Receipt Saver</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <header class="titlebar">
+    <div class="brand">Receipt&nbsp;Saver<span id="app-version" class="version" title="App version"></span></div>
+    <nav class="tabs">
+      <button data-view="run" class="tab active">This run</button>
+      <button data-view="history" class="tab">History</button>
+      <button data-view="fallbacks" class="tab">Fallbacks <span id="fb-badge" class="badge" hidden>0</span></button>
+      <button data-view="receipts" class="tab">Receipts</button>
+    </nav>
+    <div class="win-controls">
+      <button id="btn-rescan" title="Run scan now">&#10227;</button>
+      <button id="btn-min" title="Minimize">&#8211;</button>
+      <button id="btn-close" title="Close to tray">&times;</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="view-run" class="view active">
+      <div id="run-summary" class="summary"></div>
+      <div id="run-accounts"></div>
+      <div id="run-list" class="cards"></div>
+      <div id="run-empty" class="empty" hidden>Nothing new this run.</div>
+    </section>
+
+    <section id="view-history" class="view">
+      <div class="filters">
+        <input id="hist-search" type="search" placeholder="Search sender, subject, seller&hellip;" dir="auto">
+      </div>
+      <div id="hist-list" class="cards"></div>
+      <div id="hist-sentinel"></div>
+    </section>
+
+    <section id="view-fallbacks" class="view">
+      <div class="fb-toolbar">
+        <button id="fb-viewtoggle">Simple view</button>
+        <button id="fb-handoff" disabled>Handle selected with Claude &rarr;</button>
+      </div>
+      <div id="fb-list" class="cards"></div>
+      <div id="fb-empty" class="empty" hidden>No unresolved fallbacks. &#127881;</div>
+    </section>
+
+    <section id="view-receipts" class="view">
+      <div class="rx-nav"></div>
+      <div class="rx-main">
+        <input id="rx-search" type="search" placeholder="Filter this folder…" dir="auto">
+        <div class="rx-crumbs">
+          <button id="rx-back" title="Back (Alt+←)" disabled>‹ Back</button>
+          <div class="rx-crumb-trail"></div>
+          <div class="rx-sort" title="Sort this folder">
+            <button id="rx-sort-field">Date</button>
+            <button id="rx-sort-dir" title="Descending">↓</button>
+          </div>
+          <button id="rx-open" title="Open this folder in Windows Explorer">Open in Explorer</button>
+        </div>
+        <div class="rx-list"></div>
+        <div class="rx-empty" hidden></div>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast-host"></div>
+
+  <template id="tpl-card">
+    <article class="card">
+      <span class="pill"></span>
+      <div class="card-main">
+        <div class="card-title" dir="auto"></div>
+        <div class="card-sub" dir="auto"></div>
+      </div>
+      <div class="card-meta">
+        <span class="chip account"></span>
+        <span class="date"></span>
+        <a class="open-folder" href="#">Open folder</a>
+      </div>
+    </article>
+  </template>
+
+  <template id="tpl-fallback">
+    <article class="card fb">
+      <input type="checkbox" class="fb-check"
+             title="Tick to include this email when you press &quot;Handle selected with Claude&quot;">
+      <div class="card-main">
+        <div class="card-title" dir="auto"></div>
+        <div class="card-sub" dir="auto"></div>
+        <div class="fb-links">
+          <a class="open-folder" href="#">Open folder</a>
+          <a class="open-pdf" href="#">Open email.pdf</a>
+          <span class="conf"></span>
+        </div>
+        <form class="fb-form">
+          <fieldset class="fb-kinds">
+            <legend>What to do with this email</legend>
+            <label class="opt">
+              <span class="opt-head"><input type="radio" name="kind" value="rule" checked> Make a rule</span>
+              <span class="opt-desc">File this email now <b>and</b> save the settings below as a permanent rule, so future emails like it are filed automatically.</span>
+            </label>
+            <label class="opt">
+              <span class="opt-head"><input type="radio" name="kind" value="once"> Move this one only</span>
+              <span class="opt-desc">File just this one email using the settings below. No rule is saved &mdash; a similar email later will land in fallbacks again.</span>
+            </label>
+            <label class="opt">
+              <span class="opt-head"><input type="radio" name="kind" value="exclude"> Exclude as promotional</span>
+              <span class="opt-desc">This is not a receipt (newsletter / ad). Deletes the saved folder and auto-skips future emails from this sender.</span>
+            </label>
+            <label class="opt">
+              <span class="opt-head"><input type="radio" name="kind" value="skip"> Skip for now</span>
+              <span class="opt-desc">Do nothing. The email stays in this list so you can decide later.</span>
+            </label>
+          </fieldset>
+
+          <div class="fb-fields">
+            <div class="field">
+              <label>Seller</label>
+              <input class="f-seller" dir="auto"
+                     title="The business name, exactly as you want it to appear in the receipt folder name. Example: אלקטרה פאוור">
+              <span class="hint">Business name shown in the folder name.</span>
+            </div>
+            <div class="field">
+              <label>Product</label>
+              <input class="f-product" dir="auto"
+                     title="Short description of what the receipt is for. Examples: חשבונית חשמל, הזמנה, כרטיסים, מנוי">
+              <span class="hint">What the receipt is for.</span>
+            </div>
+            <div class="field">
+              <label>Category</label>
+              <select class="f-category"
+                      title="Optional sub-folder under קבלות, for recurring utility bills. Leave as 'no category' for everything else."></select>
+              <span class="hint">Optional sub-folder under קבלות (utility bills only).</span>
+            </div>
+            <div class="field">
+              <label>Destination root</label>
+              <input class="f-basedir" dir="auto" placeholder="(default: קבלות)"
+                     title="Optional. A full folder path to file this receipt somewhere other than the default קבלות folder — e.g. a specific property or project folder. Leave blank to use קבלות.">
+              <span class="hint">Optional. A different root folder instead of קבלות.</span>
+            </div>
+            <div class="field">
+              <label>Match sender contains</label>
+              <input class="f-sender" dir="auto"
+                     title="The piece of the sender's email address that identifies this business — usually its domain. Example: electra-power.co.il. Future emails whose sender contains this text will be auto-filed by the rule.">
+              <span class="hint">Text in the sender address (usually the domain) the rule matches on.</span>
+            </div>
+            <div class="field">
+              <label>Match subject contains</label>
+              <input class="f-subject" dir="auto" placeholder="(optional)"
+                     title="Optional. Also require this text in the subject line before auto-filing. Use it when one sender (e.g. a shared payment platform) sends receipts for several different businesses.">
+              <span class="hint">Optional. Also require this text in the subject.</span>
+            </div>
+          </div>
+          <button type="submit" class="fb-apply">Apply</button>
+        </form>
+      </div>
+    </article>
+  </template>
+
+  <template id="tpl-fb-compact">
+    <article class="card fb-compact">
+      <input type="checkbox" class="fb-check" title="Select for &quot;Handle selected with Claude&quot;">
+      <div class="card-main">
+        <div class="card-title" dir="auto"></div>
+        <div class="card-sub" dir="auto"></div>
+      </div>
+      <span class="conf"></span>
+      <a class="open-folder" href="#">Open folder</a>
+      <button class="fb-expand" title="Show options">&#9656;</button>
+      <div class="fb-form-slot" hidden></div>
+    </article>
+  </template>
+
+  <template id="tpl-rx-root">
+    <div class="rx-root-wrap">
+      <button class="rx-root"><span class="rx-root-label" dir="auto"></span></button>
+      <button class="rx-root-toggle" tabindex="-1"></button>
+    </div>
+  </template>
+
+  <template id="tpl-rx-row">
+    <div class="rx-row" tabindex="0">
+      <span class="rx-glyph"></span>
+      <span class="rx-name" dir="auto"></span>
+      <span class="rx-meta"></span>
+    </div>
+  </template>
+
+  <script src="app.js"></script>
+</body>
+</html>

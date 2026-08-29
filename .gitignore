@@ -7,7 +7,12 @@ ticktick_token.json
 # Runtime state
 processed_ids.json
 fallback_log.json
+history.json
+ui_state.json
 receipt_saver.log
+
+# Claude Code internals
+.claude/
 
 # Python
 __pycache__/
