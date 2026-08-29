@@ -689,4 +689,16 @@ $("#rx-search").addEventListener("input", e => {
 window.addEventListener("pywebviewready", () => {
   resetRunView();
   refreshBadge();
+  showVersion();
 });
+
+async function showVersion() {
+  const el = $("#app-version");
+  if (!el) return;
+  try {
+    const v = await api().app_version();          // "1.1.0 (f22d9cb)"
+    if (!v) return;
+    el.textContent = "v" + v.split(" ")[0];       // compact: "v1.1.0"
+    el.title = "Version " + v;                    // full build in the tooltip
+  } catch (_) { /* leave blank */ }
+}

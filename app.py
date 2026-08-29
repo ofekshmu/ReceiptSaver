@@ -21,10 +21,23 @@ import fallback_ops
 import claude_handoff
 import receipt_roots
 import ui_state
+import version
 
 SCRIPT_DIR        = Path(r"C:\Users\ofeks\Scripts\ReceiptSaver")
 UI_DIR            = SCRIPT_DIR / "ui"
 FALLBACK_LOG_FILE = SCRIPT_DIR / "fallback_log.json"
+LOG_FILE          = SCRIPT_DIR / "receipt_saver.log"
+
+
+def _log(msg: str) -> None:
+    """Append a timestamped [app.py] line to the shared log. Never raises —
+    this is the only breadcrumb trail when the window fails to appear at login."""
+    try:
+        ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(f"{ts}  [app.py] {msg}\n")
+    except Exception:
+        pass
 
 _DATED_RE = re.compile(r"^(\d{4})_(\d{2})_(\d{2})")
 _FOLDER_RE = re.compile(r"^(\d{4})_(\d{2})_(\d{2}) - (.*)$")
@@ -365,14 +378,25 @@ class Api:
     def quit_app(self):
         os._exit(0)
 
+    def app_version(self) -> str:
+        return version.full_version()
+
 
 def main():
+    import traceback
+    _log(f"launch v{version.full_version()}  pid={os.getpid()}  cwd={os.getcwd()}")
     try:
-        import webview
-    except Exception as e:
-        with open(SCRIPT_DIR / "receipt_saver.log", "a", encoding="utf-8") as f:
-            f.write(f"\n[app.py] pywebview not available: {e}\n")
-        raise SystemExit(1)
+        _run()
+    except SystemExit:
+        raise
+    except Exception:
+        _log("FATAL during startup:\n" + traceback.format_exc())
+        raise
+
+
+def _run():
+    import webview
+    _log(f"pywebview ok (backend hint: {getattr(webview, 'platform', '?')})")
 
     # RECEIPT_SAVER_UI_DRYRUN=1 boots the window without touching any mailbox —
     # used to smoke-test the UI. The scan reports "nothing new".
@@ -396,11 +420,19 @@ def main():
         width=980, height=680, x=win_x, y=win_y,
         frameless=True, easy_drag=False,
         background_color="#0f1115",
+        on_top=True,   # surface above the other apps that launch at login
     )
     api._win_x, api._win_y = win_x, win_y
     api.bind(window)
+    _log(f"window created at ({win_x},{win_y})")
 
     def _bootstrap():
+        # Drop always-on-top once we're visible, but keep focus.
+        try:
+            window.on_top = False
+        except Exception:
+            pass
+        _log("window shown — starting scan")
         api.start_scan()
 
     try:

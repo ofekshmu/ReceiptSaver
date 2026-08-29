@@ -73,7 +73,9 @@ YYYY_MM_DD - Seller Name - Product Description - [account]
 | File | Purpose |
 |------|---------|
 | `receipt_saver.py` | Scan engine. Provider-agnostic: dispatches each account to `gmail_provider` or `outlook_provider` based on its `"provider"` field, then processes a normalized message dict. `main(run_id, progress_cb)` accepts an optional progress callback and returns a run summary; `process_message()` returns a structured record per handled mail. Still runs standalone (`python receipt_saver.py`); at login it is driven by `app.py` instead |
-| `app.py` | Startup window (pywebview). Opens at login, drives the scan on a worker thread, streams results into the UI, serves history + fallback data, applies fallback decisions. Launched at login by the **Receipt Saver** shortcut in the Windows Startup folder (`pythonw app.py`, no console). `RECEIPT_SAVER_UI_DRYRUN=1` boots the window without touching any mailbox |
+| `app.py` | Startup window (pywebview). Opens at login, drives the scan on a worker thread, streams results into the UI, serves history + fallback data, applies fallback decisions. Launched at login by the **`ReceiptSaverUI`** scheduled task (`pythonw app.py`, no console). Writes `[app.py] …` breadcrumb lines (launch / window created / window shown / FATAL+traceback) to `receipt_saver.log`. `RECEIPT_SAVER_UI_DRYRUN=1` boots the window without touching any mailbox |
+| `version.py` | Single source of the app version string shown next to the wordmark. Bump `__version__`; `full_version()` appends the short git commit |
+| `install_startup.py` | Registers/removes the `ReceiptSaverUI` logon task (`--uninstall`). Uses PowerShell `Register-ScheduledTask` (no admin needed) and clears any leftover Startup-folder launcher |
 | `history.py` | Append-only `history.json` store — one record per handled mail, backs the History view |
 | `fallback_ops.py` | Heuristic `suggest()` for unresolved fallbacks + `apply_decision()` (rule / once / exclude / skip): writes `custom_rules.json`, moves the folder out of `_לטיפול ידני`, marks `fallback_log.json` resolved, patches the history row |
 | `receipt_roots.py` | Discovers every destination root (main `קבלות`, the fallback dir, Japanologia, and each `base_dir` in `custom_rules.json`) and guards `Api.browse` against filesystem access outside them. Backs the Receipts tab |
@@ -82,7 +84,7 @@ YYYY_MM_DD - Seller Name - Product Description - [account]
 | `claude_handoff.py` | Opens a pre-seeded `claude` terminal — `launch()` for fallbacks that need manual classification, `launch_error()` for an error the UI surfaced (both `cwd` the repo, so Claude has it as context) |
 | `tray.py` | Resident system-tray icon (Open / Run scan now / Quit) |
 | `ui/` | Frontend for `app.py` — `index.html`, `app.css`, `app.js`. No build step |
-| `make_shortcut.py` | One-off: creates **Receipt Saver** shortcuts (Desktop + Start Menu + Startup) that launch `pythonw app.py` with the app icon, and removes any stale `run.bat` from the Startup folder (`python make_shortcut.py`; `--no-startup` / `--startmenu-only` to limit scope) |
+| `make_shortcut.py` | One-off: creates the **Receipt Saver** Desktop + Start Menu shortcuts (`pythonw app.py`, app icon). Launch-at-login is handled separately by `install_startup.py`. `--startmenu-only` limits scope |
 | `make_icon.py` | One-off: generates `assets/receipt_saver.ico` |
 | `assets/receipt_saver.ico` | App icon (7 sizes, 16–256 px) used by the shortcuts |
 | `history.json` | Structured log of every handled mail since the UI shipped |
@@ -108,8 +110,8 @@ YYYY_MM_DD - Seller Name - Product Description - [account]
 | `token_yuval.json` | Auto-refreshing Gmail access token for yuval |
 | `ticktick_token.json` | TickTick API access token |
 | `ticktick_auth.py` | One-time TickTick authorization script |
-| `run.bat` | Convenience double-click launcher — `start "" pythonw app.py`. **Not** used at login (a `.bat` in the Startup folder pops up a console window); login uses the Startup `.lnk` created by `make_shortcut.py` instead |
-| `setup.bat` | Legacy one-time installer — registered an `ONLOGON` Task Scheduler job running the old headless `receipt_saver.py`. Superseded by the Startup shortcut; not used |
+| `run.bat` | Convenience double-click launcher — `start "" pythonw app.py`. **Not** used at login (a `.bat` in the Startup folder pops up a console window); login uses the `ReceiptSaverUI` scheduled task |
+| `setup.bat` | Legacy one-time installer — registered an `ONLOGON` Task Scheduler job running the old headless `receipt_saver.py`. Superseded by `install_startup.py`; not used |
 
 ---
 
@@ -294,16 +296,32 @@ The script shows three types of Windows toast notifications:
 
 ## Startup UI (`app.py`)
 
-At login the **Receipt Saver** shortcut in the Windows Startup folder launches
-`pythonw app.py` — a borderless, centered window (pywebview). `pythonw.exe` has
-no console and a `.lnk` never flashes a cmd window, so nothing but the UI
-appears. It replaces the old headless `python receipt_saver.py` startup run;
-`receipt_saver.py` still runs standalone for manual/scheduled use. The window
-opens, shows a scanning state, and drives the scan itself on a worker thread.
+At login the **`ReceiptSaverUI`** scheduled task (trigger *At log on*, current
+user, ~15 s delay) launches `pythonw app.py` — a borderless, centered window
+(pywebview). `pythonw.exe` has no console, so nothing but the UI appears; the
+window is created `on_top` briefly so it surfaces above the other apps that
+start at login. It replaces the old headless `python receipt_saver.py` startup
+run; `receipt_saver.py` still runs standalone for manual/scheduled use. The
+window opens, shows a scanning state, and drives the scan itself on a worker
+thread.
 
-The Startup shortcut is created (and any stale `run.bat` there removed) by
-`python make_shortcut.py`. If the terminal ever reappears at login, check
-`shell:startup` for a leftover `.bat` and re-run `make_shortcut.py`.
+A **Task Scheduler job** is used instead of a Startup-folder shortcut because it
+fires after the desktop has settled, always runs in the interactive session, and
+isn't shown on (or silenceable from) Task Manager's Startup tab. Register or
+remove it with:
+
+```
+python install_startup.py            # register (no admin needed)
+python install_startup.py --uninstall
+```
+
+Every launch appends `[app.py] …` lines to `receipt_saver.log` — `launch vX.Y.Z
+(sha)`, `window created at (x,y)`, `window shown — starting scan`, or `FATAL
+during startup` + traceback. If the window doesn't appear at login, that trail
+says how far it got. Test without rebooting: `schtasks /run /tn ReceiptSaverUI`.
+
+The window title bar shows the running version (`v1.1.0`) next to the wordmark,
+from `version.py` via `Api.app_version()`; hover it for the full `X.Y.Z (sha)`.
 
 **Four views:**
 
@@ -328,11 +346,10 @@ The Startup shortcut is created (and any stale `run.bat` there removed) by
 hides it to the tray; Quit ends the process.
 
 **Clickable icon:** run `python make_shortcut.py` once to drop **Receipt Saver**
-shortcuts on the Desktop, in the Start Menu, and in the Startup folder (run at
-login). They launch `pythonw app.py` directly (no console flash) with
-`assets/receipt_saver.ico`. Regenerate the icon with `python make_icon.py`.
-`--startmenu-only` creates only the Start Menu shortcut; `--no-startup` skips the
-run-at-login shortcut.
+shortcuts on the Desktop and in the Start Menu. They launch `pythonw app.py`
+directly (no console flash) with `assets/receipt_saver.ico`. Regenerate the icon
+with `python make_icon.py`. `--startmenu-only` limits it to the Start Menu.
+Launch-at-login is a separate step — `python install_startup.py`.
 
 **`history.json` record shape:** `id` (`account:messageId`), `run_id`,
 `handled_at`, `account`, `account_email`, `date`, `sender`, `subject`, `action`
@@ -524,8 +541,8 @@ Install all: `pip install -r requirements.txt`
 
 | Problem | Solution |
 |---------|----------|
-| Window not appearing at startup | Check `shell:startup` — a **Receipt Saver.lnk** should be there (target `pythonw.exe`, arg `app.py`); re-create it with `python make_shortcut.py` |
-| A terminal/console pops up at login instead of the window | A stale `run.bat` (or other `.bat`) is in `shell:startup`. Delete it and run `python make_shortcut.py` — it removes stale `run.bat` and installs the console-free `.lnk` |
+| Window not appearing at login | Check `receipt_saver.log` for the `[app.py]` trail. No `launch` line → the task isn't registered: run `python install_startup.py`. `launch` but no `window created` → read the `FATAL` traceback. All four lines but still no window → run `schtasks /run /tn ReceiptSaverUI` and check which monitor it opened on. Confirm the task exists: `schtasks /query /tn ReceiptSaverUI` |
+| A terminal/console pops up at login instead of the window | A stale `run.bat` (or other `.bat`) is in `shell:startup`. Delete it, then `python install_startup.py` (it clears leftover Startup-folder launchers and uses the console-free task) |
 | Startup window is blank | Check `receipt_saver.log` for an `[app.py]` line; run `python app.py` (not `pythonw`) once to see console errors |
 | Want to open the window without scanning | `set RECEIPT_SAVER_UI_DRYRUN=1` then run `app.py` |
 | Gmail auth error | Delete `token_[account].json` and run `receipt_saver.py` manually to re-authorize |

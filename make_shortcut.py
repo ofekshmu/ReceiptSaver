@@ -1,16 +1,14 @@
 """
 make_shortcut.py
 ----------------
-Create clickable "Receipt Saver" shortcuts (Desktop + Start Menu + Startup) that
-launch the app via pythonw.exe, using assets/receipt_saver.ico.
+Create clickable "Receipt Saver" shortcuts (Desktop + Start Menu) that launch
+the app via pythonw.exe, using assets/receipt_saver.ico.
 
-At login the Startup shortcut runs `pythonw app.py` directly — pythonw has no
-console, and a .lnk (unlike a .bat) never flashes a cmd window. Any stale
-`run.bat` left in the Startup folder by older installs is removed.
+This is only about the manual launch icons. To make the window open at logon,
+run  python install_startup.py  (registers a Task Scheduler job).
 
 Run once:  python make_shortcut.py
   --startmenu-only   only the Start Menu shortcut
-  --no-startup       skip the Startup (run-at-login) shortcut
 """
 
 import os
@@ -29,7 +27,6 @@ if not PYTHONW.exists():
 
 DESKTOP    = Path(os.environ["USERPROFILE"]) / "Desktop"
 START_MENU = Path(os.environ["APPDATA"]) / r"Microsoft\Windows\Start Menu\Programs"
-STARTUP    = START_MENU / "Startup"
 
 
 def _ensure_icon():
@@ -65,24 +62,11 @@ def _create(lnk: Path):
     print(f"Created {lnk}")
 
 
-def _clean_startup():
-    """Remove stale launchers older installs dropped in the Startup folder.
-    A .bat there makes cmd.exe pop up a console window at every login."""
-    for stale in ("run.bat", "receipt_saver.bat"):
-        p = STARTUP / stale
-        if p.exists():
-            p.unlink()
-            print(f"Removed stale {p}")
-
-
 def main():
     _ensure_icon()
     _create(START_MENU / "Receipt Saver.lnk")
     if "--startmenu-only" not in sys.argv:
         _create(DESKTOP / "Receipt Saver.lnk")
-    if "--startmenu-only" not in sys.argv and "--no-startup" not in sys.argv:
-        _clean_startup()
-        _create(STARTUP / "Receipt Saver.lnk")
 
 
 if __name__ == "__main__":

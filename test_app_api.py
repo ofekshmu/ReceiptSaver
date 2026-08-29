@@ -220,6 +220,19 @@ class TestAskClaudeError(unittest.TestCase):
         self.assertIn("nope", res["error"])
 
 
+class TestAppVersion(unittest.TestCase):
+    def test_full_version_starts_with_semver(self):
+        import version
+        v = version.full_version()
+        self.assertRegex(v, r"^\d+\.\d+\.\d+")
+
+    def test_api_exposes_version(self):
+        api = appmod.Api(scan_fn=lambda run_id, progress_cb: {
+            "run_id": run_id, "saved": 0, "fallback": 0, "excluded": 0, "records": []})
+        import version
+        self.assertEqual(api.app_version(), version.full_version())
+
+
 class TestSearchReceipts(unittest.TestCase):
     def setUp(self):
         import receipt_roots
