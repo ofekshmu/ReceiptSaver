@@ -229,6 +229,46 @@ class Api:
     def categories(self) -> list:
         return fallback_ops.CATEGORIES
 
+    # -- bill categories (categories.json) ------------------------------
+    def _cat_write(self, mutate) -> dict:
+        """load -> mutate(cats) -> (save if truthy) -> return {ok, categories}."""
+        import categories as C
+        try:
+            cats = C.load_categories()
+            changed = mutate(C, cats)
+            if changed is False:
+                return {"ok": False, "error": "no change / not found"}
+            C.save_categories(cats)
+            return {"ok": True, "categories": cats}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def list_categories(self) -> list:
+        import categories as C
+        return C.load_categories()
+
+    def category_add(self, name: str, config: dict = None) -> dict:
+        cfg = config or {}
+        return self._cat_write(lambda C, cats: cats.append(
+            C.new_category(name, seller=cfg.get("seller"), product=cfg.get("product"),
+                           base_dir=cfg.get("base_dir"), subfolder=cfg.get("subfolder"),
+                           exclude=cfg.get("exclude", False), categories=cats)) or True)
+
+    def category_update(self, category_id: str, patch: dict) -> dict:
+        return self._cat_write(lambda C, cats: C.update_category(cats, category_id, patch or {}))
+
+    def category_delete(self, category_id: str) -> dict:
+        return self._cat_write(lambda C, cats: C.delete_category(cats, category_id))
+
+    def category_merge(self, src_id: str, dst_id: str) -> dict:
+        return self._cat_write(lambda C, cats: C.merge_categories(cats, src_id, dst_id))
+
+    def category_remove_match(self, category_id: str, index: int) -> dict:
+        return self._cat_write(lambda C, cats: C.remove_match(cats, category_id, int(index)))
+
+    def category_add_match(self, category_id: str, entry: dict) -> dict:
+        return self._cat_write(lambda C, cats: C.add_match(cats, category_id, entry or {}))
+
     # -- ui state ---------------------------------------------------------
     def get_ui_state(self) -> dict:
         return ui_state.load()

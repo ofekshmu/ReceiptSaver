@@ -175,14 +175,27 @@ def _mark_resolved(fallback_log_path: Path, message_id: str, new_path: str,
     _atomic_write_json(fallback_log_path, rows)
 
 
+def _category_destination(cat: dict, entry: dict, seller: str, product: str,
+                          receipts_dir: Path) -> Path:
+    root = Path(cat["base_dir"]) if cat.get("base_dir") else Path(receipts_dir)
+    base = root / cat["subfolder"] if cat.get("subfolder") else root
+    name = (f'{entry["date"]} - {receipt_saver.sanitize(seller)} - '
+            f'{receipt_saver.sanitize(product)} - {entry["account"]}')
+    folder, _ = receipt_saver.unique_folder(base, name)
+    return folder
+
+
 def apply_decision(entry: dict, decision: dict, *,
                    rules_path: Path = None, fallback_log_path: Path = None,
                    cleanup_log_path: Path = None, history_path: Path = None,
+                   categories_path: Path = None,
                    receipts_dir: Path = None, manual_dir: Path = None,
                    resolved_by: str = "user") -> dict:
+    import categories as _cat
     rules_path        = rules_path or CUSTOM_RULES_FILE
     fallback_log_path = fallback_log_path or FALLBACK_LOG_FILE
     cleanup_log_path  = cleanup_log_path or CLEANUP_LOG_FILE
+    categories_path   = categories_path or _cat.CATEGORIES_FILE
     receipts_dir      = Path(receipts_dir or RECEIPTS_DIR)
     import datetime as _dt
     src = Path(entry["folder_path"])
@@ -209,12 +222,21 @@ def apply_decision(entry: dict, decision: dict, *,
     if kind == "skip":
         return {"ok": True, "kind": "skip"}
 
+    def _match_entry() -> dict:
+        e = {"sender_contains": decision.get("match_sender_contains")}
+        if decision.get("match_subject_contains"):
+            e["subject_contains"] = decision["match_subject_contains"]
+        if decision.get("match_exclude_subject_contains"):
+            e["exclude_subject_contains"] = decision["match_exclude_subject_contains"]
+        if decision.get("product_body_regex"):
+            e["product_body_regex"] = decision["product_body_regex"]
+        return e
+
     if kind == "exclude":
-        rule = {"_comment": f'auto-added from fallback {entry["message_id"]}',
-                "match_sender_contains": decision["match_sender_contains"],
-                "match_subject_contains": decision.get("match_subject_contains"),
-                "exclude": True}
-        _append_json_list(rules_path, rule)
+        cats = _cat.load_categories(categories_path)
+        xc = _cat.exclude_category(cats)
+        _cat.add_match(cats, xc["id"], _match_entry())
+        _cat.save_categories(cats, categories_path)
         if src.exists():
             shutil.rmtree(src, ignore_errors=True)
         _append_json_list(cleanup_log_path, {
@@ -228,25 +250,50 @@ def apply_decision(entry: dict, decision: dict, *,
                        path=history_path)
         return {"ok": True, "kind": "exclude"}
 
-    # kind in ("rule", "once")
-    dst = compute_destination(entry, decision, receipts_dir)
-    if kind == "rule":
-        rule = {"_comment": f'auto-added from fallback {entry["message_id"]}',
-                "match_sender_contains": decision["match_sender_contains"],
-                "match_subject_contains": decision.get("match_subject_contains"),
-                "seller": decision["seller"], "product": decision["product"],
-                "category": decision.get("category")}
-        if decision.get("base_dir"):
-            rule["base_dir"] = decision["base_dir"]
-        _append_json_list(rules_path, rule)
+    if kind == "once":
+        dst = compute_destination(entry, decision, receipts_dir)
+        moved = _move_folder(src, dst) if src.exists() else dst
+        _mark_resolved(fallback_log_path, entry["message_id"], str(moved),
+                       resolved_at=resolved_at, resolved_by=resolved_by)
+        history.upsert(rec_id, {
+            **_history_base(), "action": "RESOLVED", "resolution": "once",
+            "seller": decision["seller"], "product": decision["product"],
+            "category": decision.get("category"),
+            "folder_name": moved.name, "folder_path": str(moved),
+        }, path=history_path)
+        return {"ok": True, "kind": "once", "dest": str(moved)}
+
+    # kind in ("category", "new_category", or legacy "rule" == new_category)
+    cats = _cat.load_categories(categories_path)
+    if kind == "category":
+        cat = _cat.find(cats, decision.get("category_id"))
+        if cat is None:
+            return {"ok": False, "error": f'no category {decision.get("category_id")!r}'}
+    else:
+        name = decision.get("category_name") or decision.get("seller") or "category"
+        cat = _cat.new_category(name, seller=decision.get("seller"),
+                                product=decision.get("product"),
+                                base_dir=decision.get("base_dir"),
+                                subfolder=decision.get("category"), categories=cats)
+        cats.append(cat)
+
+    _cat.add_match(cats, cat["id"], {**_match_entry(),
+                                     "seller": decision.get("seller"),
+                                     "product": decision.get("product")})
+    _cat.save_categories(cats, categories_path)
+
+    seller  = decision.get("seller") or cat.get("seller")
+    product = decision.get("product") or cat.get("product")
+    dst = _category_destination(cat, entry, seller, product, receipts_dir)
     moved = _move_folder(src, dst) if src.exists() else dst
     _mark_resolved(fallback_log_path, entry["message_id"], str(moved),
                    resolved_at=resolved_at, resolved_by=resolved_by)
     history.upsert(rec_id, {
-        **_history_base(),
-        "action": "RESOLVED", "resolution": kind,
-        "seller": decision["seller"], "product": decision["product"],
-        "category": decision.get("category"),
+        **_history_base(), "action": "RESOLVED", "resolution": "category",
+        "seller": receipt_saver.sanitize(seller),
+        "product": receipt_saver.sanitize(product),
+        "category": cat.get("subfolder"),
+        "category_id": cat["id"], "category_name": cat.get("name"),
         "folder_name": moved.name, "folder_path": str(moved),
     }, path=history_path)
-    return {"ok": True, "kind": kind, "dest": str(moved)}
+    return {"ok": True, "kind": kind, "category_id": cat["id"], "dest": str(moved)}

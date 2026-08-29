@@ -245,6 +245,66 @@ class TestAskClaudeError(unittest.TestCase):
         self.assertIn("nope", res["error"])
 
 
+class TestCategoryApi(unittest.TestCase):
+    def setUp(self):
+        import categories as C
+        self.tmp = Path(tempfile.mkdtemp())
+        self.f = self.tmp / "categories.json"
+        self.f.write_text(json.dumps([
+            {"id": "elec", "name": "חשמל", "seller": "אלקטרה", "product": "חשבונית חשמל",
+             "base_dir": None, "subfolder": "חשבנות/חשמל",
+             "match": [{"sender_contains": "iec.co.il"}]},
+            {"id": "gas", "name": "גז", "seller": "פזגז", "product": "חשבונית גז",
+             "base_dir": None, "subfolder": "חשבנות/גז",
+             "match": [{"sender_contains": "pazgas.co.il"}]},
+        ], ensure_ascii=False), encoding="utf-8")
+        self._orig = C.CATEGORIES_FILE
+        C.CATEGORIES_FILE = self.f
+        self.addCleanup(setattr, C, "CATEGORIES_FILE", self._orig)
+
+    def _api(self):
+        return appmod.Api(scan_fn=lambda run_id, progress_cb: None)
+
+    def _read(self):
+        return json.loads(self.f.read_text(encoding="utf-8"))
+
+    def test_list(self):
+        self.assertEqual([c["id"] for c in self._api().list_categories()], ["elec", "gas"])
+
+    def test_add_update_delete(self):
+        api = self._api()
+        self.assertTrue(api.category_add("מים", {"seller": "מי ראשון",
+                                                 "subfolder": "חשבנות/מים"})["ok"])
+        self.assertIn("מים", [c["name"] for c in self._read()])
+        cid = next(c["id"] for c in self._read() if c["name"] == "מים")
+        self.assertTrue(api.category_update(cid, {"seller": "תאגיד מים"})["ok"])
+        self.assertEqual(next(c for c in self._read() if c["id"] == cid)["seller"],
+                         "תאגיד מים")
+        self.assertTrue(api.category_delete(cid)["ok"])
+        self.assertNotIn(cid, [c["id"] for c in self._read()])
+
+    def test_merge(self):
+        self.assertTrue(self._api().category_merge("gas", "elec")["ok"])
+        ids = [c["id"] for c in self._read()]
+        self.assertEqual(ids, ["elec"])
+        senders = [m["sender_contains"] for m in self._read()[0]["match"]]
+        self.assertEqual(senders, ["iec.co.il", "pazgas.co.il"])
+
+    def test_add_and_remove_match(self):
+        api = self._api()
+        self.assertTrue(api.category_add_match("gas", {"sender_contains": "shared.co",
+                                                      "subject_contains": "גז"})["ok"])
+        self.assertEqual(len(self._read()[1]["match"]), 2)
+        self.assertTrue(api.category_remove_match("gas", 1)["ok"])
+        self.assertEqual(len(self._read()[1]["match"]), 1)
+
+    def test_bad_ops_report_error(self):
+        api = self._api()
+        self.assertFalse(api.category_delete("ghost")["ok"])
+        self.assertFalse(api.category_merge("elec", "elec")["ok"])
+        self.assertFalse(api.category_update("ghost", {"seller": "x"})["ok"])
+
+
 class TestPickFolder(unittest.TestCase):
     def _api(self, dialog):
         api = appmod.Api(scan_fn=lambda run_id, progress_cb: None)

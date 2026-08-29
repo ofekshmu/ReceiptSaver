@@ -70,12 +70,18 @@ class TestApplyDecision(unittest.TestCase):
             "id": "ofek:m1", "action": "FALLBACK", "seller": None, "product": None,
             "category": None, "folder_name": self.src.name, "folder_path": str(self.src),
         }], ensure_ascii=False), encoding="utf-8")
+        self.cats = self.tmp / "categories.json"
+        self.cats.write_text("[]", encoding="utf-8")
         self.paths = dict(rules_path=self.rules, fallback_log_path=self.flog,
                           cleanup_log_path=self.clog, history_path=self.hist,
+                          categories_path=self.cats,
                           receipts_dir=self.receipts, manual_dir=self.manual)
 
     def _entry(self):
         return json.loads(self.flog.read_text(encoding="utf-8"))[0]
+
+    def _cats(self):
+        return json.loads(self.cats.read_text(encoding="utf-8"))
 
     def test_compute_destination_with_category(self):
         dst = fallback_ops.compute_destination(
@@ -84,15 +90,16 @@ class TestApplyDecision(unittest.TestCase):
         self.assertEqual(dst, self.receipts / "חשבנות" / "חשמל" /
                          "2026_08_25 - S - P - ofek")
 
-    def test_rule_decision_writes_rule_moves_folder_resolves(self):
+    def test_new_category_decision_creates_category_moves_folder_resolves(self):
         fallback_ops.apply_decision(self._entry(), {
-            "kind": "rule", "seller": "שופ", "product": "חשבונית",
-            "category": None, "base_dir": None,
+            "kind": "new_category", "category_name": "שופ",
+            "seller": "שופ", "product": "חשבונית", "category": None, "base_dir": None,
             "match_sender_contains": "shop.co.il", "match_subject_contains": None,
         }, **self.paths)
-        rules = json.loads(self.rules.read_text(encoding="utf-8"))
-        self.assertEqual(rules[-1]["match_sender_contains"], "shop.co.il")
-        self.assertEqual(rules[-1]["seller"], "שופ")
+        cats = self._cats()
+        self.assertEqual(len(cats), 1)
+        self.assertEqual(cats[0]["seller"], "שופ")
+        self.assertEqual(cats[0]["match"][0]["sender_contains"], "shop.co.il")
         self.assertFalse(self.src.exists())
         dst = self.receipts / "2026_08_25 - שופ - חשבונית - ofek"
         self.assertTrue((dst / "email.pdf").exists())
@@ -100,12 +107,38 @@ class TestApplyDecision(unittest.TestCase):
         row = json.loads(self.hist.read_text(encoding="utf-8"))[0]
         self.assertEqual(row["action"], "RESOLVED")
         self.assertEqual(row["seller"], "שופ")
-        self.assertEqual(row["resolution"], "rule")
-        # resolve stamp on both the history row and the fallback-log entry
+        self.assertEqual(row["resolution"], "category")
+        self.assertEqual(row["category_name"], "שופ")
         self.assertEqual(row["resolved_by"], "user")
         self.assertRegex(row["resolved_at"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d$")
-        self.assertEqual(self._entry()["resolved_by"], "user")
         self.assertEqual(self._entry()["resolved_at"], row["resolved_at"])
+
+    def test_assign_to_existing_category_appends_match_and_uses_its_route(self):
+        self.cats.write_text(json.dumps([{
+            "id": "elec", "name": "חשמל", "seller": "אלקטרה", "product": "חשבונית חשמל",
+            "base_dir": None, "subfolder": "חשבנות/חשמל",
+            "match": [{"sender_contains": "iec.co.il"}],
+        }], ensure_ascii=False), encoding="utf-8")
+        fallback_ops.apply_decision(self._entry(), {
+            "kind": "category", "category_id": "elec",
+            "seller": "אלקטרה", "product": "חשבונית חשמל",
+            "match_sender_contains": "shop.co.il", "match_subject_contains": None,
+        }, **self.paths)
+        cats = self._cats()
+        self.assertEqual([m["sender_contains"] for m in cats[0]["match"]],
+                         ["iec.co.il", "shop.co.il"])
+        self.assertNotIn("seller", cats[0]["match"][1])          # equals default -> not stored
+        dst = self.receipts / "חשבנות" / "חשמל" / "2026_08_25 - אלקטרה - חשבונית חשמל - ofek"
+        self.assertTrue((dst / "email.pdf").exists())
+        row = json.loads(self.hist.read_text(encoding="utf-8"))[0]
+        self.assertEqual(row["category_id"], "elec")
+
+    def test_assign_to_missing_category_errors(self):
+        res = fallback_ops.apply_decision(self._entry(), {
+            "kind": "category", "category_id": "ghost", "seller": "x", "product": "y",
+            "match_sender_contains": "shop.co.il",
+        }, **self.paths)
+        self.assertFalse(res["ok"])
 
     def test_resolved_by_override_is_recorded(self):
         fallback_ops.apply_decision(self._entry(), {
@@ -117,31 +150,33 @@ class TestApplyDecision(unittest.TestCase):
         self.assertEqual(row["resolved_by"], "claude")
         self.assertEqual(self._entry()["resolved_by"], "claude")
 
-    def test_once_decision_moves_without_writing_rule(self):
+    def test_once_decision_writes_no_category(self):
         fallback_ops.apply_decision(self._entry(), {
             "kind": "once", "seller": "שופ", "product": "חשבונית",
             "category": None, "base_dir": None,
             "match_sender_contains": "shop.co.il", "match_subject_contains": None,
         }, **self.paths)
-        self.assertEqual(json.loads(self.rules.read_text(encoding="utf-8")), [])
+        self.assertEqual(self._cats(), [])
         self.assertTrue((self.receipts / "2026_08_25 - שופ - חשבונית - ofek" / "email.pdf").exists())
         self.assertEqual(self._entry()["resolved"], True)
 
-    def test_exclude_decision_writes_exclude_rule_deletes_folder_logs_cleanup(self):
+    def test_exclude_decision_appends_to_exclude_category_deletes_folder(self):
         fallback_ops.apply_decision(self._entry(), {
             "kind": "exclude", "seller": None, "product": None, "category": None,
             "base_dir": None, "match_sender_contains": "shop.co.il",
             "match_subject_contains": None,
         }, **self.paths)
-        rules = json.loads(self.rules.read_text(encoding="utf-8"))
-        self.assertTrue(rules[-1]["exclude"])
+        cats = self._cats()
+        xc = next(c for c in cats if c["id"] == "excluded")
+        self.assertTrue(xc["exclude"])
+        self.assertEqual(xc["match"][-1]["sender_contains"], "shop.co.il")
         self.assertFalse(self.src.exists())
         cleanup = json.loads(self.clog.read_text(encoding="utf-8"))
         self.assertEqual(cleanup[-1]["action"], "DELETED")
         self.assertTrue(self._entry()["resolved"])
         row = json.loads(self.hist.read_text(encoding="utf-8"))[0]
+        self.assertEqual(row["resolution"], "exclude")
         self.assertEqual(row["resolved_by"], "user")
-        self.assertRegex(row["resolved_at"], r"^\d{4}-\d\d-\d\dT")
 
     def test_skip_decision_is_noop(self):
         fallback_ops.apply_decision(self._entry(), {"kind": "skip"}, **self.paths)
@@ -170,8 +205,11 @@ class TestApplyDecisionCreatesHistoryRow(unittest.TestCase):
             "date": "2026_08_25", "sender": "who@shop.co.il", "subject": "mystery",
             "folder_name": self.src.name, "folder_path": str(self.src), "resolved": False,
         }], ensure_ascii=False), encoding="utf-8")
+        self.cats = self.tmp / "categories.json"
+        self.cats.write_text("[]", encoding="utf-8")
         self.paths = dict(rules_path=self.rules, fallback_log_path=self.flog,
                           cleanup_log_path=self.clog, history_path=self.hist,
+                          categories_path=self.cats,
                           receipts_dir=self.receipts, manual_dir=self.manual)
 
     def _entry(self):
@@ -180,9 +218,10 @@ class TestApplyDecisionCreatesHistoryRow(unittest.TestCase):
     def _rows(self):
         return json.loads(self.hist.read_text(encoding="utf-8"))
 
-    def test_rule_resolution_appends_history_row(self):
+    def test_new_category_resolution_appends_history_row(self):
         fallback_ops.apply_decision(self._entry(), {
-            "kind": "rule", "seller": "שופ", "product": "חשבונית", "category": None,
+            "kind": "new_category", "category_name": "שופ",
+            "seller": "שופ", "product": "חשבונית", "category": None,
             "base_dir": None, "match_sender_contains": "shop.co.il",
             "match_subject_contains": None,
         }, **self.paths)
@@ -190,7 +229,7 @@ class TestApplyDecisionCreatesHistoryRow(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["id"], "ofek:m9")
         self.assertEqual(rows[0]["action"], "RESOLVED")
-        self.assertEqual(rows[0]["resolution"], "rule")
+        self.assertEqual(rows[0]["resolution"], "category")
         self.assertEqual(rows[0]["seller"], "שופ")
         self.assertEqual(rows[0]["subject"], "mystery")
         self.assertTrue(rows[0]["folder_path"].endswith("שופ - חשבונית - ofek"))

@@ -87,6 +87,23 @@ class TestMatchCategory(unittest.TestCase):
     def test_no_match_returns_none(self):
         self.assertIsNone(self.m("nobody@nowhere.example"))
 
+    def test_per_entry_seller_product_override(self):
+        cats = [{
+            "id": "platform", "name": "billing platform", "seller": "Generic Co",
+            "product": "חשבונית", "base_dir": None, "subfolder": "חשבנות",
+            "match": [
+                {"sender_contains": "plat.com", "subject_contains": "ACME",
+                 "seller": "ACME Ltd", "product": "הזמנה"},
+                {"sender_contains": "plat.com"},           # no override -> defaults
+            ],
+        }]
+        self.assertEqual(
+            C.match_category("x@plat.com", "invoice from ACME", categories=cats),
+            ("ACME Ltd", "הזמנה", "חשבנות", None))
+        self.assertEqual(
+            C.match_category("x@plat.com", "invoice from someone else", categories=cats),
+            ("Generic Co", "חשבונית", "חשבנות", None))
+
     def test_body_whitespace_normalised(self):
         self.assertEqual(
             self.m("s@payngo.co.il", body="מחסני\xa0\xa0 חשמל")[0], "מחסני חשמל")

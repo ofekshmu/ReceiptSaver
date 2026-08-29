@@ -39,9 +39,13 @@ CATEGORIES_FILE = SCRIPT_DIR / "categories.json"
 
 EXCLUDE = "__exclude__"
 
-# keys allowed on a single `match[]` entry
-MATCH_KEYS = ("sender_contains", "subject_contains", "exclude_subject_contains",
-              "body_contains", "product_body_regex")
+# condition keys on a single `match[]` entry
+MATCH_COND_KEYS = ("sender_contains", "subject_contains", "exclude_subject_contains",
+                   "body_contains")
+# a match[] entry may also carry these per-entry OVERRIDES of the category
+# defaults — e.g. same category/route, but this sender+subject uses its own seller
+MATCH_OVERRIDE_KEYS = ("seller", "product", "product_body_regex")
+MATCH_KEYS = MATCH_COND_KEYS + MATCH_OVERRIDE_KEYS
 
 
 def _sanitize(s: str) -> str:
@@ -90,6 +94,123 @@ def slugify(name: str, taken: set = None) -> str:
     return f"{base}-{n}"
 
 
+# ---------------------------------------------------------------------------
+# mutation helpers — each takes the in-memory list and returns it (or a bool);
+# callers persist with save_categories().
+# ---------------------------------------------------------------------------
+
+def find(categories: list, category_id: str) -> dict:
+    for c in categories:
+        if c.get("id") == category_id:
+            return c
+    return None
+
+
+def new_category(name: str, *, seller=None, product=None, base_dir=None,
+                 subfolder=None, exclude=False, categories: list = None) -> dict:
+    taken = {c.get("id") for c in (categories or [])}
+    return {
+        "id": slugify(name, taken),
+        "name": (name or "").strip() or "category",
+        "seller": seller or None,
+        "product": product or None,
+        "base_dir": base_dir or None,
+        "subfolder": subfolder or None,
+        "exclude": bool(exclude),
+        "match": [],
+    }
+
+
+def clean_match_entry(entry: dict, category: dict = None) -> dict:
+    """Keep only known keys with real values; drop per-entry seller/product that
+    just repeat the category default (so overrides are only stored when needed)."""
+    out = {}
+    cat = category or {}
+    for k in MATCH_COND_KEYS + ("product_body_regex",):
+        v = entry.get(k)
+        if v not in (None, "", []):
+            out[k] = v
+    for k in ("seller", "product"):
+        v = entry.get(k)
+        if v not in (None, "", []) and v != cat.get(k):
+            out[k] = v
+    return out
+
+
+def add_match(categories: list, category_id: str, entry: dict) -> bool:
+    cat = find(categories, category_id)
+    if cat is None:
+        return False
+    cleaned = clean_match_entry(entry, cat)
+    if not cleaned.get("sender_contains") and not cleaned.get("subject_contains"):
+        return False
+    cat.setdefault("match", [])
+    if cleaned in cat["match"]:
+        return True
+    cat["match"].append(cleaned)
+    return True
+
+
+def remove_match(categories: list, category_id: str, index: int) -> bool:
+    cat = find(categories, category_id)
+    if cat is None or not (0 <= index < len(cat.get("match", []))):
+        return False
+    cat["match"].pop(index)
+    return True
+
+
+def update_category(categories: list, category_id: str, patch: dict) -> bool:
+    cat = find(categories, category_id)
+    if cat is None:
+        return False
+    for k in ("name", "seller", "product", "base_dir", "subfolder"):
+        if k in patch:
+            cat[k] = patch[k] or None
+    if "exclude" in patch:
+        cat["exclude"] = bool(patch["exclude"])
+    return True
+
+
+def delete_category(categories: list, category_id: str) -> bool:
+    n = len(categories)
+    categories[:] = [c for c in categories if c.get("id") != category_id]
+    return len(categories) != n
+
+
+def merge_categories(categories: list, src_id: str, dst_id: str) -> bool:
+    """Move src's match entries into dst, then drop src. Where src and dst have
+    different default seller/product, src's defaults are baked onto the moved
+    entries so their routing is preserved."""
+    if src_id == dst_id:
+        return False
+    src, dst = find(categories, src_id), find(categories, dst_id)
+    if src is None or dst is None:
+        return False
+    for m in src.get("match", []):
+        moved = dict(m)
+        for k in ("seller", "product"):
+            if k not in moved and src.get(k) and src.get(k) != dst.get(k):
+                moved[k] = src[k]
+        cleaned = clean_match_entry(moved, dst)
+        if cleaned and cleaned not in dst.setdefault("match", []):
+            dst["match"].append(cleaned)
+    return delete_category(categories, src_id)
+
+
+EXCLUDE_CATEGORY_ID = "excluded"
+
+
+def exclude_category(categories: list) -> dict:
+    """The shared bucket for 'not a receipt' senders; created on first use."""
+    cat = find(categories, EXCLUDE_CATEGORY_ID)
+    if cat is None:
+        cat = {"id": EXCLUDE_CATEGORY_ID, "name": "(excluded)", "exclude": True,
+               "seller": None, "product": None, "base_dir": None,
+               "subfolder": None, "match": []}
+        categories.append(cat)
+    return cat
+
+
 def _entry_matches(m: dict, sender: str, subject: str, body_norm: str) -> bool:
     sf = m.get("sender_contains") or ""
     jf = m.get("subject_contains") or ""
@@ -119,14 +240,16 @@ def match_category(sender: str, subject: str = "", body: str = "",
                 continue
             if cat.get("exclude"):
                 return EXCLUDE, None, None, None
-            product = cat.get("product")
+            # per-entry overrides win over the category defaults
+            seller = m.get("seller") or cat.get("seller")
+            product = m.get("product") or cat.get("product")
             rx = m.get("product_body_regex") or ""
             if rx and body_norm:
                 hit = re.search(rx, body_norm)
                 if hit:
                     product = _sanitize(hit.group(1).strip())
             base_dir = Path(cat["base_dir"]) if cat.get("base_dir") else None
-            return cat.get("seller"), product, cat.get("subfolder"), base_dir
+            return seller, product, cat.get("subfolder"), base_dir
     return None
 
 
@@ -153,8 +276,8 @@ def to_legacy_rules(categories: list = None) -> list:
             if cat.get("exclude"):
                 rule["exclude"] = True
             else:
-                rule["seller"] = cat.get("seller")
-                rule["product"] = cat.get("product")
+                rule["seller"] = m.get("seller") or cat.get("seller")
+                rule["product"] = m.get("product") or cat.get("product")
                 rule["category"] = cat.get("subfolder")
                 if cat.get("base_dir"):
                     rule["base_dir"] = cat["base_dir"]
