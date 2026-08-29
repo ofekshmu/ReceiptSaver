@@ -100,6 +100,7 @@ YYYY_MM_DD - Seller Name - Product Description - [account]
 | `test_app_api.py` | Unit tests for the `app.Api` data methods and scan orchestration |
 | `japanologia_backfill.py` | One-time script — backfills Japanese lesson attachments since April 15, 2026 |
 | `backfill_fallback_history.py` | One-off — writes `RESOLVED` history rows for fallbacks resolved before `history.upsert` existed (walks `fallback_log.json` for `resolved: true`, skips messages already in `history.json`). `--dry-run` to preview. Idempotent |
+| `migrate_rules_to_categories.py` | One-off, reversible — `custom_rules.json` → `categories.json`, 1 rule → 1 category. Dry run by default: prints the result and equivalence-checks old `match_custom` vs new `match_category` over every sender/subject in `history.json` + `fallback_log.json` plus a synthetic hit/miss per rule; refuses `--apply` on any routing diff. `--apply` writes `categories.json` and renames `custom_rules.json` → `custom_rules.legacy.json` (kept). Rollback: delete `categories.json`, rename the legacy file back |
 | `custom_rules.json` | User-defined sender rules — grows over time |
 | `fallback_log.json` | Log of all unrecognized emails |
 | `processed_ids.json` | Tracks every email already seen — prevents duplicates |
