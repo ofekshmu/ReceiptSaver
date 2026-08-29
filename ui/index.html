@@ -14,6 +14,7 @@
       <button data-view="history" class="tab">History</button>
       <button data-view="fallbacks" class="tab">Fallbacks <span id="fb-badge" class="badge" hidden>0</span></button>
       <button data-view="receipts" class="tab">Receipts</button>
+      <button data-view="categories" class="tab">Categories</button>
     </nav>
     <div class="win-controls">
       <button id="btn-rescan" title="Run scan now">&#10227;</button>
@@ -80,7 +81,33 @@
         <div class="rx-empty" hidden></div>
       </div>
     </section>
+
+    <section id="view-categories" class="view">
+      <div class="cat-bar">
+        <input id="cat-new-name" type="text" dir="auto" placeholder="New category name…">
+        <button id="cat-new-btn" type="button">Add category</button>
+      </div>
+      <div id="cat-list"></div>
+      <div id="cat-empty" class="rx-empty" hidden>No categories yet.</div>
+    </section>
   </main>
+
+  <template id="tpl-cat">
+    <article class="cat" data-id="">
+      <div class="cat-row">
+        <button class="cat-expand" title="Show senders">▸</button>
+        <input class="cat-name" dir="auto" title="Category name">
+        <input class="cat-seller" dir="auto" placeholder="default seller">
+        <input class="cat-product" dir="auto" placeholder="default product">
+        <input class="cat-subfolder" dir="auto" placeholder="subfolder (e.g. חשבנות/חשמל)">
+        <span class="cat-count" title="senders"></span>
+        <select class="cat-merge" title="Merge this category into another"></select>
+        <button class="cat-save" title="Save changes">Save</button>
+        <button class="cat-del" title="Delete category">✕</button>
+      </div>
+      <div class="cat-matches" hidden></div>
+    </article>
+  </template>
 
   <div id="toast-host"></div>
   <div id="win-resize-grip" title="Drag to resize"></div>
@@ -138,8 +165,13 @@
           <fieldset class="fb-kinds">
             <legend>What to do with this email</legend>
             <label class="opt">
-              <span class="opt-head"><input type="radio" name="kind" value="rule" checked> Make a rule</span>
-              <span class="opt-desc">File this email now <b>and</b> save the settings below as a permanent rule, so future emails like it are filed automatically.</span>
+              <span class="opt-head"><input type="radio" name="kind" value="category" checked> File under a category</span>
+              <span class="opt-desc">File this email now <b>and</b> add its sender to a category, so future emails like it file automatically to the same place.</span>
+              <span class="opt-body">
+                <select class="f-cat-assign" title="Which category this sender belongs to"></select>
+                <input class="f-cat-name" type="text" dir="auto" hidden
+                       placeholder="New category name (e.g. חשמל)">
+              </span>
             </label>
             <label class="opt">
               <span class="opt-head"><input type="radio" name="kind" value="once"> Move this one only</span>

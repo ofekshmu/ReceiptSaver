@@ -18,6 +18,7 @@ $$(".tab").forEach(t => t.addEventListener("click", () => {
   if (t.dataset.view === "history" && histRows.length === 0) loadHistory();
   if (t.dataset.view === "fallbacks") loadFallbacks();
   if (t.dataset.view === "receipts") rxInit();
+  if (t.dataset.view === "categories") catLoad();
 }));
 
 // ---- window dragging -------------------------------------------------
@@ -411,6 +412,54 @@ async function fillBasedirSelect(sel, current) {
   });
 }
 
+// "File under a category" picker: ＋ New category… (sentinel) + one option per
+// existing category. Picking an existing one prefills seller/product (editable
+// per-bill overrides) and pins the route/subfolder to that category.
+const FB_NEWCAT = "__new__";
+let FB_CATS = null;
+
+async function fillCatAssign(scope, s) {
+  const sel = $(".f-cat-assign", scope);
+  if (!sel) return;
+  if (!FB_CATS) {
+    try { FB_CATS = await api().list_categories(); } catch (_) { FB_CATS = []; }
+  }
+  const nameInput = $(".f-cat-name", scope);
+  const subSel = $(".f-category", scope);
+  const baseSel = $(".f-basedir", scope);
+  sel.innerHTML = "";
+  const add = (v, label) => {
+    const o = document.createElement("option");
+    o.value = v; o.textContent = label; sel.appendChild(o);
+  };
+  add(FB_NEWCAT, "＋ New category…");
+  FB_CATS.filter(c => !c.exclude).forEach(c =>
+    add(c.id, `${c.name}${c.subfolder ? " — " + c.subfolder : ""}`));
+
+  const apply = () => {
+    const isNew = sel.value === FB_NEWCAT;
+    nameInput.hidden = !isNew;
+    const cat = isNew ? null : FB_CATS.find(c => c.id === sel.value);
+    // an existing category owns the route + subfolder; a new one takes them from the form
+    for (const el of [subSel, baseSel]) if (el) el.disabled = !!cat;
+    if (cat) {
+      $(".f-seller", scope).value = cat.seller || "";
+      $(".f-product", scope).value = cat.product || "";
+      if (subSel) subSel.value = cat.subfolder || "";
+      if (baseSel && ![...baseSel.options].some(o => o.value === (cat.base_dir || "")))
+        baseSel.appendChild(Object.assign(document.createElement("option"),
+          { value: cat.base_dir || "", textContent: cat.base_dir || "קבלות (default)" }));
+      if (baseSel) baseSel.value = cat.base_dir || "";
+    }
+  };
+  sel.addEventListener("change", apply);
+  // preselect a category whose route matches the heuristic's category guess
+  const guess = s.category
+    ? FB_CATS.find(c => !c.exclude && c.subfolder === s.category) : null;
+  sel.value = guess ? guess.id : FB_NEWCAT;
+  apply();
+}
+
 function wireForm(scope, it, s) {
   const sel = $(".f-category", scope);
   sel.innerHTML = `<option value="">no category</option>` +
@@ -424,24 +473,38 @@ function wireForm(scope, it, s) {
     const r = scope.querySelector(`.fb-form input[value="${s.kind}"]`);
     if (r) r.checked = true;
   }
+  fillCatAssign(scope, s);
   $(".fb-form", scope).addEventListener("submit", async e => {
     e.preventDefault();
     const form = e.currentTarget;
+    const kind = $("input[name=kind]:checked", form).value;
+    const seller  = $(".f-seller", form).value.trim();
+    const product = $(".f-product", form).value.trim();
+    const subfolder = $(".f-category", form).value || null;
+    const base_dir = (v => v && v !== FB_BROWSE ? v : null)($(".f-basedir", form).value.trim());
     const decision = {
-      kind: $("input[name=kind]:checked", form).value,
-      seller: $(".f-seller", form).value.trim(),
-      product: $(".f-product", form).value.trim(),
-      category: $(".f-category", form).value || null,
-      base_dir: (v => v && v !== FB_BROWSE ? v : null)($(".f-basedir", form).value.trim()),
+      kind, seller, product,
+      category: subfolder, base_dir,
       match_sender_contains: $(".f-sender", form).value.trim(),
       match_subject_contains: $(".f-subject", form).value.trim() || null,
     };
+    if (kind === "category") {
+      const pick = $(".f-cat-assign", form).value;
+      if (pick === FB_NEWCAT) {
+        decision.kind = "new_category";
+        decision.category_name = $(".f-cat-name", form).value.trim();
+        if (!decision.category_name) { toast("Name the new category first", true); return; }
+      } else {
+        decision.category_id = pick;
+      }
+    }
     const res = await api().apply_fallback(it.message_id, decision);
     if (res && res.ok) {
       form.closest(".card").remove();
-      toast(`Resolved: ${decision.seller || it.subject}`);
+      toast(`Resolved: ${seller || it.subject}`);
+      FB_CATS = null;                 // a category may have been created/changed
       loadFallbacks();
-      refreshHistory();          // so the new RESOLVED row shows without reopening
+      refreshHistory();
     } else {
       toast((res && res.error) || "Failed to apply", true);
     }
@@ -960,3 +1023,108 @@ async function showVersion() {
     el.title = "Version " + v;                    // full build in the tooltip
   } catch (_) { /* leave blank */ }
 }
+
+// ---- Categories view -------------------------------------------------
+let catRows = [];
+
+async function catLoad() {
+  try { catRows = await api().list_categories(); }
+  catch (_) { catRows = []; }
+  catRender();
+}
+
+function catRender() {
+  const list = $("#cat-list");
+  list.innerHTML = "";
+  $("#cat-empty").hidden = catRows.length > 0;
+  for (const c of catRows) list.appendChild(catRowEl(c));
+}
+
+function catRowEl(cat) {
+  const n = $("#tpl-cat").content.cloneNode(true);
+  const art = n.querySelector(".cat");
+  art.dataset.id = cat.id;
+  if (cat.exclude) art.classList.add("is-exclude");
+  const nameEl = $(".cat-name", art), sellerEl = $(".cat-seller", art),
+        prodEl = $(".cat-product", art), subEl = $(".cat-subfolder", art);
+  nameEl.value = cat.name || "";
+  sellerEl.value = cat.seller || "";
+  prodEl.value = cat.product || "";
+  subEl.value = cat.subfolder || "";
+  const matches = cat.match || [];
+  $(".cat-count", art).textContent = matches.length + (matches.length === 1 ? " sender" : " senders");
+  if (cat.exclude) { sellerEl.hidden = prodEl.hidden = subEl.hidden = true; }
+
+  const merge = $(".cat-merge", art);
+  merge.innerHTML = `<option value="">merge into…</option>` +
+    catRows.filter(o => o.id !== cat.id && !o.exclude)
+           .map(o => `<option value="${o.id}">${o.name}</option>`).join("");
+  merge.addEventListener("change", async () => {
+    if (!merge.value) return;
+    const into = catRows.find(o => o.id === merge.value);
+    if (!confirm(`Move all ${matches.length} sender(s) from “${cat.name}” into “${into.name}” and delete “${cat.name}”?`)) {
+      merge.value = ""; return;
+    }
+    const res = await api().category_merge(cat.id, merge.value);
+    toast(res.ok ? `Merged into ${into.name}` : (res.error || "Merge failed"), !res.ok);
+    if (res.ok) { catRows = res.categories; catRender(); FB_CATS = null; }
+  });
+
+  $(".cat-save", art).addEventListener("click", async () => {
+    const res = await api().category_update(cat.id, {
+      name: nameEl.value.trim(), seller: sellerEl.value.trim(),
+      product: prodEl.value.trim(), subfolder: subEl.value.trim(),
+    });
+    toast(res.ok ? "Saved" : (res.error || "Save failed"), !res.ok);
+    if (res.ok) { catRows = res.categories; FB_CATS = null; }
+  });
+
+  $(".cat-del", art).addEventListener("click", async () => {
+    if (!confirm(`Delete category “${cat.name}”? Its ${matches.length} sender(s) will no longer auto-file.`)) return;
+    const res = await api().category_delete(cat.id);
+    toast(res.ok ? "Deleted" : (res.error || "Delete failed"), !res.ok);
+    if (res.ok) { catRows = res.categories; catRender(); FB_CATS = null; }
+  });
+
+  const box = $(".cat-matches", art), caret = $(".cat-expand", art);
+  caret.addEventListener("click", () => {
+    box.hidden = !box.hidden;
+    caret.textContent = box.hidden ? "▸" : "▾";
+    if (!box.hidden) catFillMatches(box, cat);
+  });
+  return n;
+}
+
+function catFillMatches(box, cat) {
+  box.innerHTML = "";
+  (cat.match || []).forEach((m, i) => {
+    const row = document.createElement("div");
+    row.className = "cat-match";
+    const bits = [m.sender_contains && `from ${m.sender_contains}`,
+                  m.subject_contains && `subject ~ “${m.subject_contains}”`,
+                  m.exclude_subject_contains && `not subject ~ “${m.exclude_subject_contains}”`,
+                  m.body_contains && `body ~ “${m.body_contains}”`,
+                  m.seller && `seller → ${m.seller}`,
+                  m.product && `product → ${m.product}`].filter(Boolean);
+    const span = document.createElement("span");
+    span.textContent = bits.join("  ·  ") || "(empty match)";
+    const del = document.createElement("button");
+    del.className = "cat-match-del"; del.textContent = "✕"; del.title = "Remove this sender";
+    del.addEventListener("click", async () => {
+      const res = await api().category_remove_match(cat.id, i);
+      toast(res.ok ? "Removed" : (res.error || "Failed"), !res.ok);
+      if (res.ok) { catRows = res.categories; catRender(); FB_CATS = null; }
+    });
+    row.append(span, del);
+    box.appendChild(row);
+  });
+}
+
+$("#cat-new-btn").addEventListener("click", async () => {
+  const inp = $("#cat-new-name");
+  const name = inp.value.trim();
+  if (!name) { toast("Name the category first", true); return; }
+  const res = await api().category_add(name, {});
+  toast(res.ok ? `Added ${name}` : (res.error || "Add failed"), !res.ok);
+  if (res.ok) { inp.value = ""; catRows = res.categories; catRender(); FB_CATS = null; }
+});
