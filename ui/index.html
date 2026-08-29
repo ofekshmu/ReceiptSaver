@@ -24,6 +24,10 @@
 
   <main>
     <section id="view-run" class="view active">
+      <div id="run-prompt" class="run-prompt" hidden>
+        <p>No scan has run yet this session.</p>
+        <button id="run-start">Run scan</button>
+      </div>
       <div id="run-summary" class="summary"></div>
       <div id="run-accounts"></div>
       <div id="run-list" class="cards"></div>
@@ -41,7 +45,14 @@
     <section id="view-fallbacks" class="view">
       <div class="fb-toolbar">
         <button id="fb-viewtoggle">Simple view</button>
-        <button id="fb-handoff" disabled>Handle selected with Claude &rarr;</button>
+        <button id="fb-handoff" disabled title="Handle selected with Claude">
+          <svg class="claude-mark" viewBox="0 0 24 24" aria-hidden="true" width="14" height="14">
+            <path fill="currentColor" d="M12 1.5l1.9 5.1 5.1 1.9-5.1 1.9L12 15.5l-1.9-5.1L5 8.5l5.1-1.9z
+              M18.5 14l1 2.6 2.6 1-2.6 1-1 2.6-1-2.6-2.6-1 2.6-1z
+              M5 15l.8 2 2 .8-2 .8L5 21.5l-.8-2-2-.8 2-.8z"/>
+          </svg>
+          <span aria-hidden="true">&rarr;</span>
+        </button>
       </div>
       <div id="fb-list" class="cards"></div>
       <div id="fb-empty" class="empty" hidden>No unresolved fallbacks. &#127881;</div>
@@ -50,15 +61,20 @@
     <section id="view-receipts" class="view">
       <div class="rx-nav"></div>
       <div class="rx-main">
-        <input id="rx-search" type="search" placeholder="Filter this folder…" dir="auto">
+        <input id="rx-search" type="search" placeholder="Search all receipts…" dir="auto">
         <div class="rx-crumbs">
-          <button id="rx-back" title="Back (Alt+←)" disabled>‹ Back</button>
+          <button id="rx-back" title="Back (Alt+←)" disabled>‹</button>
           <div class="rx-crumb-trail"></div>
           <div class="rx-sort" title="Sort this folder">
             <button id="rx-sort-field">Date</button>
             <button id="rx-sort-dir" title="Descending">↓</button>
           </div>
-          <button id="rx-open" title="Open this folder in Windows Explorer">Open in Explorer</button>
+          <button id="rx-open" title="Open this folder in Windows Explorer">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
+                 stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/>
+            </svg>
+          </button>
         </div>
         <div class="rx-list"></div>
         <div class="rx-empty" hidden></div>
@@ -67,6 +83,19 @@
   </main>
 
   <div id="toast-host"></div>
+  <div id="win-resize-grip" title="Drag to resize"></div>
+
+  <!-- Right-click menu for Receipts explorer rows (see rxContextMenu in app.js) -->
+  <div id="rx-ctx-menu" role="menu" hidden>
+    <button type="button" class="rx-ctx-item" data-act="ask-claude" role="menuitem">
+      <svg viewBox="0 0 24 24" aria-hidden="true" width="13" height="13">
+        <path fill="currentColor" d="M12 1.5l1.9 5.1 5.1 1.9-5.1 1.9L12 15.5l-1.9-5.1L5 8.5l5.1-1.9z
+        M18.5 14l1 2.6 2.6 1-2.6 1-1 2.6-1-2.6-2.6-1 2.6-1z
+        M5 15l.8 2 2 .8-2 .8L5 21.5l-.8-2-2-.8 2-.8z"/>
+      </svg>
+      <span>Ask Claude</span>
+    </button>
+  </div>
 
   <template id="tpl-card">
     <article class="card">
@@ -78,7 +107,12 @@
       <div class="card-meta">
         <span class="chip account"></span>
         <span class="date"></span>
-        <a class="open-folder" href="#">Open folder</a>
+        <a class="open-folder" href="#" title="Open folder">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+               stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/>
+          </svg>
+        </a>
       </div>
     </article>
   </template>
@@ -91,7 +125,12 @@
         <div class="card-title" dir="auto"></div>
         <div class="card-sub" dir="auto"></div>
         <div class="fb-links">
-          <a class="open-folder" href="#">Open folder</a>
+          <a class="open-folder" href="#" title="Open folder">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+                 stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/>
+            </svg>
+          </a>
           <a class="open-pdf" href="#">Open email.pdf</a>
           <span class="conf"></span>
         </div>
@@ -137,8 +176,8 @@
             </div>
             <div class="field">
               <label>Destination root</label>
-              <input class="f-basedir" dir="auto" placeholder="(default: קבלות)"
-                     title="Optional. A full folder path to file this receipt somewhere other than the default קבלות folder — e.g. a specific property or project folder. Leave blank to use קבלות.">
+              <select class="f-basedir" dir="auto"
+                      title="Where to file this receipt. Pick a known root, or “Choose a folder…” to browse for a new one. Leave as the default to use קבלות."></select>
               <span class="hint">Optional. A different root folder instead of קבלות.</span>
             </div>
             <div class="field">
@@ -168,7 +207,12 @@
         <div class="card-sub" dir="auto"></div>
       </div>
       <span class="conf"></span>
-      <a class="open-folder" href="#">Open folder</a>
+      <a class="open-folder" href="#" title="Open folder">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+             stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/>
+        </svg>
+      </a>
       <button class="fb-expand" title="Show options">&#9656;</button>
       <div class="fb-form-slot" hidden></div>
     </article>

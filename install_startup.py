@@ -14,6 +14,10 @@ and not ``schtasks /create``, which wants elevation on some machines).
 Run once:  python install_startup.py
            python install_startup.py --uninstall
 
+The task launches ``app.py --autostart``; that flag is what tells app.py to
+run the mailbox scan immediately (a manual launch, from the desktop/Start
+Menu shortcut, opens idle — the user starts the scan themselves).
+
 Idempotent: also clears any leftover Startup-folder launcher (`run.bat`,
 `Receipt Saver.lnk`) so the window can't open twice.
 """
@@ -58,7 +62,7 @@ $ErrorActionPreference = 'Stop'
 $pw  = '{PYTHONW}'
 $app = '{APP_PY}'
 $dir = '{HERE}'
-$action  = New-ScheduledTaskAction -Execute $pw -Argument ('"' + $app + '"') -WorkingDirectory $dir
+$action  = New-ScheduledTaskAction -Execute $pw -Argument ('"' + $app + '" --autostart') -WorkingDirectory $dir
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
 $trigger.Delay = 'PT15S'
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `

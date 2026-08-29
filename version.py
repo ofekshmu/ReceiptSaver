@@ -2,7 +2,8 @@
 version.py
 ----------
 Single source of truth for the app version shown in the UI (next to the
-"Receipt Saver" wordmark). Bump ``__version__`` on a meaningful release.
+"Receipt Saver" wordmark). Bump the patch digit of ``__version__`` on every
+change to the app, committed or not.
 
 ``full_version()`` appends the short git commit (best-effort, cached) so the
 window always tells you exactly which build is running.
@@ -11,7 +12,7 @@ window always tells you exactly which build is running.
 import subprocess
 from pathlib import Path
 
-__version__ = "1.1.0"
+__version__ = "1.1.18"
 
 _HERE = Path(__file__).parent
 _cache = None

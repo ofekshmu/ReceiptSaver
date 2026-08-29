@@ -73,15 +73,15 @@ YYYY_MM_DD - Seller Name - Product Description - [account]
 | File | Purpose |
 |------|---------|
 | `receipt_saver.py` | Scan engine. Provider-agnostic: dispatches each account to `gmail_provider` or `outlook_provider` based on its `"provider"` field, then processes a normalized message dict. `main(run_id, progress_cb)` accepts an optional progress callback and returns a run summary; `process_message()` returns a structured record per handled mail. Still runs standalone (`python receipt_saver.py`); at login it is driven by `app.py` instead |
-| `app.py` | Startup window (pywebview). Opens at login, drives the scan on a worker thread, streams results into the UI, serves history + fallback data, applies fallback decisions. Launched at login by the **`ReceiptSaverUI`** scheduled task (`pythonw app.py`, no console). Writes `[app.py] …` breadcrumb lines (launch / window created / window shown / FATAL+traceback) to `receipt_saver.log`. `RECEIPT_SAVER_UI_DRYRUN=1` boots the window without touching any mailbox |
+| `app.py` | Startup window (pywebview). Drives the scan on a worker thread, streams results into the UI, serves history + fallback data, applies fallback decisions. Launched at login by the **`ReceiptSaverUI`** scheduled task (`pythonw app.py --autostart`, no console); a manual launch (no `--autostart`) opens idle instead of scanning immediately — see [Startup UI](#startup-ui-apppy). Writes `[app.py] …` breadcrumb lines (launch / window created / window shown / FATAL+traceback) to `receipt_saver.log`. `RECEIPT_SAVER_UI_DRYRUN=1` boots the window without touching any mailbox |
 | `version.py` | Single source of the app version string shown next to the wordmark. Bump `__version__`; `full_version()` appends the short git commit |
-| `install_startup.py` | Registers/removes the `ReceiptSaverUI` logon task (`--uninstall`). Uses PowerShell `Register-ScheduledTask` (no admin needed) and clears any leftover Startup-folder launcher |
-| `history.py` | Append-only `history.json` store — one record per handled mail, backs the History view |
-| `fallback_ops.py` | Heuristic `suggest()` for unresolved fallbacks + `apply_decision()` (rule / once / exclude / skip): writes `custom_rules.json`, moves the folder out of `_לטיפול ידני`, marks `fallback_log.json` resolved, patches the history row |
+| `install_startup.py` | Registers/removes the `ReceiptSaverUI` logon task (`--uninstall`). The task action is `pythonw app.py --autostart` — that flag is what tells `app.py` to scan immediately instead of opening idle. Uses PowerShell `Register-ScheduledTask` (no admin needed) and clears any leftover Startup-folder launcher |
+| `history.py` | Append-only `history.json` store — one record per handled mail, backs the History view. `append` (dedup by `id`), `update` (patch matching rows only), `upsert` (patch if present, else append — used for fallback resolutions) |
+| `fallback_ops.py` | Heuristic `suggest()` for unresolved fallbacks + `apply_decision()` (rule / once / exclude / skip): writes `custom_rules.json`, moves the folder out of `_לטיפול ידני`, marks `fallback_log.json` resolved, and upserts a `RESOLVED` history row (created from the fallback entry if no scan-time row exists) |
 | `receipt_roots.py` | Discovers every destination root (main `קבלות`, the fallback dir, Japanologia, and each `base_dir` in `custom_rules.json`) and guards `Api.browse` against filesystem access outside them. Backs the Receipts tab |
 | `ui_state.py` | Persists small window UI preferences (`hidden_roots`, `fallbacks_simple`, `rx_sort`) to `ui_state.json` (atomic write) |
 | `ui_state.json` | Runtime UI preferences — git-ignored |
-| `claude_handoff.py` | Opens a pre-seeded `claude` terminal — `launch()` for fallbacks that need manual classification, `launch_error()` for an error the UI surfaced (both `cwd` the repo, so Claude has it as context) |
+| `claude_handoff.py` | Opens a pre-seeded `claude` terminal — `launch()` for fallbacks that need manual classification, `launch_error()` for an error the UI surfaced, `launch_receipt()` for one right-clicked Receipts entry (all `cwd` the repo). Every seeded prompt ends with `NO_AUTO_CHANGES` — an instruction that the session must only investigate and propose, and change nothing until the user says so |
 | `tray.py` | Resident system-tray icon (Open / Run scan now / Quit) |
 | `ui/` | Frontend for `app.py` — `index.html`, `app.css`, `app.js`. No build step |
 | `make_shortcut.py` | One-off: creates the **Receipt Saver** Desktop + Start Menu shortcuts (`pythonw app.py`, app icon). Launch-at-login is handled separately by `install_startup.py`. `--startmenu-only` limits scope |
@@ -98,6 +98,7 @@ YYYY_MM_DD - Seller Name - Product Description - [account]
 | `test_claude_handoff.py` | Unit tests for the Claude handoff prompt builder |
 | `test_app_api.py` | Unit tests for the `app.Api` data methods and scan orchestration |
 | `japanologia_backfill.py` | One-time script — backfills Japanese lesson attachments since April 15, 2026 |
+| `backfill_fallback_history.py` | One-off — writes `RESOLVED` history rows for fallbacks resolved before `history.upsert` existed (walks `fallback_log.json` for `resolved: true`, skips messages already in `history.json`). `--dry-run` to preview. Idempotent |
 | `custom_rules.json` | User-defined sender rules — grows over time |
 | `fallback_log.json` | Log of all unrecognized emails |
 | `processed_ids.json` | Tracks every email already seen — prevents duplicates |
@@ -260,6 +261,7 @@ These were added through manual review sessions with Claude:
 | `planetcinema.co.il` | — | Planet Cinema | כרטיסים | — | — |
 | `smartbee.co.il` | — | גן ילדים דיסני ראשון | שכר לימוד | — | — |
 | `billing@sternum-sec.com` | — | משכורת | תלוש שכר (extracted from body: `תלוש שכר לחודש <month> <year>`) | — | Work\Sternum\משכורות |
+| `payngo.co.il` | *(body must contain `מחסני חשמל`)* | מחסני חשמל | הזמנה | — | — | `sales@payngo.co.il` is a shared Matrix/Tafnit mail platform used by many retailers — the sender alone doesn't identify the seller, so the rule requires `מחסני חשמל` in the body (`match_body_contains`) |
 
 ---
 
@@ -297,13 +299,20 @@ The script shows three types of Windows toast notifications:
 ## Startup UI (`app.py`)
 
 At login the **`ReceiptSaverUI`** scheduled task (trigger *At log on*, current
-user, ~15 s delay) launches `pythonw app.py` — a borderless, centered window
-(pywebview). `pythonw.exe` has no console, so nothing but the UI appears; the
-window is created `on_top` briefly so it surfaces above the other apps that
-start at login. It replaces the old headless `python receipt_saver.py` startup
-run; `receipt_saver.py` still runs standalone for manual/scheduled use. The
-window opens, shows a scanning state, and drives the scan itself on a worker
-thread.
+user, ~15 s delay) launches `pythonw app.py --autostart` — a borderless,
+centered window (pywebview). `pythonw.exe` has no console, so nothing but the
+UI appears; the window is created `on_top` briefly so it surfaces above the
+other apps that start at login. It replaces the old headless `python
+receipt_saver.py` startup run; `receipt_saver.py` still runs standalone for
+manual/scheduled use.
+
+The `--autostart` flag is what makes the scan start immediately — it's only
+passed by the logon task. A manual launch (Desktop/Start Menu shortcut, no
+flag) opens **idle**: the **This run** tab shows a "Run scan" button instead
+of scanning right away, so opening the app to browse History/Fallbacks/Receipts
+doesn't always trigger a mailbox scan. The titlebar's ⟲ button and the tray's
+"Run scan now" start a scan the same way (`Api.start_scan`) regardless of how
+the app was launched.
 
 A **Task Scheduler job** is used instead of a Startup-folder shortcut because it
 fires after the desktop has settled, always runs in the interactive session, and
@@ -316,21 +325,44 @@ python install_startup.py --uninstall
 ```
 
 Every launch appends `[app.py] …` lines to `receipt_saver.log` — `launch vX.Y.Z
-(sha)`, `window created at (x,y)`, `window shown — starting scan`, or `FATAL
-during startup` + traceback. If the window doesn't appear at login, that trail
-says how far it got. Test without rebooting: `schtasks /run /tn ReceiptSaverUI`.
+(sha)`, `window created at (x,y) size WxH`, `window shown — starting scan
+(autostart)` / `window shown — manual launch, waiting for user to start scan`,
+or `FATAL during startup` + traceback. If the window doesn't appear at login,
+that trail says how far it got. Test without rebooting: `schtasks /run /tn
+ReceiptSaverUI`.
 
 The window title bar shows the running version (`v1.1.0`) next to the wordmark,
 from `version.py` via `Api.app_version()`; hover it for the full `X.Y.Z (sha)`.
 
-**Four views:**
+**Resizing.** The window is frameless, so it has no OS resize border; a small
+grip (`#win-resize-grip`, bottom-right corner, drag cursor) drives
+`Api.resize_by` the same way the titlebar drag drives `Api.move_by` —
+origin-independent pointer deltas, since the backend's `screenX/Y` is
+window-relative. Both drags use **backpressure** rather than a
+`requestAnimationFrame` flush: each `move_by` / `resize_by` is a
+JS↔Python bridge round-trip that can outlast a frame, so firing one per
+frame regardless let stale calls queue up and the window replayed a
+growing backlog behind the cursor. Now at most one call is in flight;
+pointer movement that arrives while it's pending accumulates (sub-pixel
+remainder carried) and the next call sends the whole delta at once, so
+the window stays a single constant IPC latency behind the mouse instead
+of drifting further back the longer you drag. `window.events.resized` persists the final size (debounced
+0.5 s so a drag doesn't spam writes) to `ui_state.json` (`win_w`/`win_h`,
+default `980`/`680`, floor `820`/`520`); the next launch opens at that size
+instead of always resetting to the default. The floor was measured with
+Playwright against `ui/index.html` — the titlebar clips below ~550px wide —
+with margin added so the window can be shrunk without ever clipping the
+titlebar or toolbars; `html, body { overflow-x: hidden }` is a second,
+belt-and-suspenders guarantee that no horizontal scrollbar can appear.
+
+**Four views:**, switched via the titlebar tabs (a faded vertical divider separates each tab so they don't read as merged together).
 
 | View | What it shows |
 |------|---------------|
-| **This run** | Live results of the scan that runs when the window opens: a card per handled mail, plus a **per-account status list** (`ofek ✓ · yuval ✓ · sternum ⚠ needs re-authorization …`) driven by `connecting` / `account` / `error` / `done` events — so a slow or failing account is visible immediately instead of the view looking stuck. The scan always resolves to a definite sentence — `Scan complete — N new receipts saved` / `…no new mail found` / `Scan stopped early — see errors above`; re-opening the tab reconciles it from `Api.get_run()`. Each surfaced error (scan-error rows and error toasts) carries an **Ask Claude** button (Claude-mark icon) — it calls `Api.ask_claude_error(text)`, which opens a `claude` terminal in the repo pre-seeded to debug that error. |
-| **History** | Every mail handled since the UI shipped, newest first, lazy-loaded on scroll, with a text filter over sender/subject/seller. Backed by `history.json`. |
-| **Fallbacks** | Unresolved `fallback_log.json` entries (badge shows the count). Each row has a form pre-filled by a heuristic guess (`fallback_ops.suggest`, sender + subject only — no body, no network, no AI). Pick **Make a rule** / **Move this one only** / **Exclude as promotional** / **Skip**, adjust fields, **Apply**. Multi-select + **Handle selected with Claude →** opens a pre-seeded `claude` terminal for the hard ones. A **Simple view** toggle collapses every entry to a one-line row (subject + `sender · account · date` + confidence); click a row to expand its full form. The toggle persists in `ui_state.json`. |
-| **Receipts** | Read-only explorer. Left rail lists every destination root (`receipt_roots.discover_roots` — main `קבלות`, `_לטיפול ידני`, Japanologia, and each custom-rule `base_dir`; roots not yet created are dimmed). The right pane is a breadcrumb navigator over the selected root: click a folder to descend, a crumb to jump to an ancestor, the **‹ Back** button (or **Alt+←**) to step back through visited folders, double-click a file to open it in its default app, or **Open in Explorer** for the current folder. Two **sort** buttons in the toolbar toggle the field (**Name** / **Date**) and direction (**↑** / **↓**); folders always sort before files, the choice persists in `ui_state.json` (`rx_sort`, default `date_desc`), and Date order uses the `YYYY_MM_DD` prefix of dated folders, otherwise the filesystem mtime. Dated `YYYY_MM_DD - Seller - Product - label` folders are parsed for display: each row shows the cleaned **Seller - Product** title, a human date (`25 Aug 2026`) and an account chip, with a 🧾 glyph, each in a shaded box. Plain folders and files show their raw name. The box at the top is a **filter for the current folder only** — it narrows the visible rows to those whose name, seller, or account contains the text (client-side, no walk); clearing it restores the full folder listing. (`Api.search_receipts`, the old recursive cross-root walk, is retained but no longer wired to the UI.) Any root can be hidden with its `⊘` button (it moves to a **Hidden** section) and restored with `＋`; the set persists in `ui_state.json`. No writes — `Api.browse` refuses any path outside the known roots. |
+| **This run** | On a manual launch, opens idle with a **"Run scan"** button (no scan happens until it's clicked, the titlebar ⟲ is pressed, or the tray's "Run scan now" is used); on an `--autostart` login launch, the scan starts immediately and this tab shows it live. Live results: a card per handled mail, plus a **per-account status list** (`ofek ✓ · yuval ✓ · sternum ⚠ needs re-authorization …`) driven by `connecting` / `account` / `error` / `done` events — so a slow or failing account is visible immediately instead of the view looking stuck. The scan always resolves to a definite sentence — `Scan complete — N new receipts saved` / `…no new mail found` / `Scan stopped early — see errors above`; re-opening the tab reconciles it from `Api.get_run()`. Each surfaced error (scan-error rows and error toasts) carries an **Ask Claude** button (Claude-mark icon) — it calls `Api.ask_claude_error(text)`, which opens a `claude` terminal in the repo pre-seeded to debug that error. |
+| **History** | Every mail handled since the UI shipped, newest first, lazy-loaded on scroll, with a text filter over sender/subject/seller. Backed by `history.json`. Resolved-fallback rows show `· resolved <date> by you/Claude/backfill`. The card's folder link (shared `#tpl-card`, so **This run** too) is the icon-only outlined-folder glyph, not an "Open folder" text link. |
+| **Fallbacks** | Unresolved `fallback_log.json` entries (badge shows the count). Each row has a form pre-filled by a heuristic guess (`fallback_ops.suggest`, sender + subject only — no body, no network, no AI). Pick **Make a rule** / **Move this one only** / **Exclude as promotional** / **Skip**, adjust fields, **Apply**. The **Destination root** field is a dropdown (`select.f-basedir`, filled by `fillBasedirSelect` from `Api.list_roots`): `קבלות (default)`, every known root, then **＋ Choose a folder…** — that last option calls `Api.pick_folder` (pywebview `FOLDER_DIALOG`) and adds whatever you browse to as a new selected option; cancelling restores the previous choice. Submitting with a non-default root sets `decision.base_dir`, so **Make a rule** writes it into `custom_rules.json` and it auto-appears in the dropdown (and the Receipts rail) from then on. Multi-select + the icon-only **Claude-mark → button** (`#fb-handoff`, no "Handle selected with Claude" label, just the mark and an arrow) opens a pre-seeded `claude` terminal for the hard ones. Each row also has its own icon-only Claude button (Claude-mark SVG, no label — `fallbackClaudeButton`) for a single-entry handoff, and an icon-only outlined-folder link (the same SVG as the Receipts explorer's folder icon, not the emoji-based one) instead of an "Open folder" text link. A **Simple view** toggle collapses every entry to a one-line row (subject + `sender · account · date` + confidence); click a row to expand its full form. The toggle persists in `ui_state.json`. |
+| **Receipts** | Read-only explorer. Left rail lists every destination root (`receipt_roots.discover_roots` — main `קבלות`, `_לטיפול ידני`, Japanologia, and each custom-rule `base_dir`; roots not yet created are dimmed), each entry separated from the next by a faded divider line. The right pane is a breadcrumb navigator over the selected root: click a folder to descend, a crumb to jump to an ancestor, the **‹** button (or **Alt+←**) to step back through visited folders, double-click a file to open it in its default app, or the outlined-folder icon button to open the current folder in Windows Explorer (an inline SVG using `currentColor`, so it matches the app's palette exactly instead of the mismatched colors of a Windows folder emoji). The breadcrumb trail stays on one line — a crumb too long for the available width is clipped with an ellipsis, and hovering any crumb (or a row) shows its full path in a native tooltip. Two **sort** buttons in the toolbar toggle the field (**Name** / **Date**) and direction (**↑** / **↓**); folders always sort before files, the choice persists in `ui_state.json` (`rx_sort`, default `date_desc`), and Date order uses the `YYYY_MM_DD` prefix of dated folders, otherwise the filesystem mtime. Dated `YYYY_MM_DD - Seller - Product - label` folders are parsed for display: each row shows the cleaned **Seller - Product** title, a human date (`25 Aug 2026`) and an account chip, with a 📁 folder glyph (they're still real folders — one PDF, occasionally more, inside; glyphs are desaturated with CSS `grayscale` to match the app's monochrome look), each in a shaded box. Plain folders and files show their raw name. A search box at the top runs `Api.search_receipts` — a recursive, depth-capped walk of **every** root — once 2+ characters are typed, and lists matches as `root / relative\path`; clearing it back below 2 characters restores the plain (non-recursive) current-folder listing. Clicking a folder in the results leaves search mode and navigates into that folder — `rxExitSearch({ noBrowse: true })` suppresses its usual re-browse of the pre-search folder so the two navigations don't race (the stale re-browse used to win and snap you back to where you searched from); the Back button while searching uses the same guard. Any root can be hidden with its `⊘` button (it moves to a **Hidden** section) and restored with `＋`; the set persists in `ui_state.json`. **Right-click any row** for a one-item **Ask Claude** menu that opens a `claude` terminal seeded with a prompt about that entry (see *Capabilities with Claude → Right-click an explorer entry*). No writes — `Api.browse` refuses any path outside the known roots. |
 
 **Applying a fallback decision** (`fallback_ops.apply_decision`):
 
@@ -341,6 +373,23 @@ from `version.py` via `Api.app_version()`; hover it for the full `X.Y.Z (sha)`.
 - `exclude` — append an `{"exclude": true}` rule, delete the folder, log to
   `cleanup_log.json`, mark resolved.
 - `skip` — nothing; the row stays for next time.
+
+The `RESOLVED` history write is an **upsert** (`history.upsert`), not a plain
+`history.update`: it patches the fallback's existing history row if there is one,
+otherwise it appends a fresh row seeded from the `fallback_log.json` entry
+(`id`, account, date, sender, subject, folder). Every resolution also records
+`resolved_at` (now, ISO seconds) and `resolved_by` — `apply_decision` defaults it
+to `user`; callers pass `resolved_by="claude"` for batch resolves. Plain `update` silently dropped
+the write whenever no scan-time `FALLBACK` row existed (e.g. `history.json` not
+yet created, or the fallback logged before scan-time history recording), so
+hand-resolved fallbacks never showed up in the History tab. `skip` still writes
+nothing.
+
+After a successful **Apply**, the UI also calls `refreshHistory()` (drops the
+cached page state and re-fetches from the top), so the new `RESOLVED` row shows
+without reopening the window. Fallbacks resolved *before* this fix left no
+history trace — run `python backfill_fallback_history.py` once to create their
+rows from `fallback_log.json`.
 
 **Tray:** a resident tray icon (Open / Run scan now / Quit). Closing the window
 hides it to the tray; Quit ends the process.
@@ -356,7 +405,13 @@ Launch-at-login is a separate step — `python install_startup.py`.
 (`DOWNLOADED | ICOUNT | JAPANOLOGIA | FALLBACK | EXCLUDED | RESOLVED`), `seller`,
 `product`, `category`, `folder_name`, `folder_path`, `files`, `rule_source`
 (`hardcoded | custom | icount | japanologia | null`). Resolved fallbacks also get
-`resolution` (`rule | once | exclude`).
+`resolution` (`rule | once | exclude`, or `backfilled` for pre-fix rows),
+`resolved_at` (ISO-8601 seconds — a bare `YYYY-MM-DD` for date-only backfills),
+and `resolved_by`: **`user`** (worked through the Fallbacks tab form),
+**`claude`** (batch-resolved by `move_fallbacks.py`), or **`unknown`**
+(backfilled, source not recorded). The same `resolved_at` / `resolved_by` are
+also written back onto the `fallback_log.json` entry. The History card shows
+`· resolved <date> by you/Claude/backfill` on these rows.
 
 ---
 
@@ -449,6 +504,20 @@ Since Claude has Gmail MCP access to your `ofek` account, you can ask things lik
 - *"Did I get a Cellcom bill this month?"*
 - *"Show me all my Wolt receipts from March"*
 - *"How much did I spend on KSP last year?"*
+
+### Right-click an explorer entry → "Ask Claude"
+
+In the **Receipts** view, right-clicking any row (folder or file, in the plain
+listing or in search results) opens a one-item menu. **Ask Claude** calls
+`Api.ask_claude_receipt(entry)` → `claude_handoff.launch_receipt`, which opens a
+`claude` terminal in the repo (window title `Claude - receipt`) pre-seeded with a
+one-line prompt naming that entry — its cleaned title, the account/date shown on
+the row, and its full path — so you can pick up the conversation from there. Same
+single-token `cmd /k claude "<prompt>"` mechanism as the fallback / error
+hand-offs; double quotes in any field are neutralised to `'`. The menu is a
+single `#rx-ctx-menu` element in `index.html`, positioned at the cursor (clamped
+to the viewport) and dismissed on outside click, `Escape`, window blur, or
+scroll.
 
 ---
 

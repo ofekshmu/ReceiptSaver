@@ -57,6 +57,23 @@ def update(record_id: str, patch: dict, path: Path = None) -> None:
             _write(rows, path)
 
 
+def upsert(record_id: str, record: dict, path: Path = None) -> None:
+    """Patch the row with this id if it exists, otherwise append a new one
+    (with ``id`` forced to ``record_id``). Unlike ``update``, this never
+    silently drops the write when no matching row is present — used when
+    resolving a fallback that may never have been recorded during a scan."""
+    path = path or HISTORY_FILE
+    with _LOCK:
+        rows = load(path)
+        for r in rows:
+            if r.get("id") == record_id:
+                r.update(record)
+                _write(rows, path)
+                return
+        rows.append({**record, "id": record_id})
+        _write(rows, path)
+
+
 def page(offset: int = 0, limit: int = 50, path: Path = None) -> list:
     rows = load(path or HISTORY_FILE)
     rows = list(reversed(rows))

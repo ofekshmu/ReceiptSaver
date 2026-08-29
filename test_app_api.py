@@ -201,8 +201,17 @@ class TestAskClaudeError(unittest.TestCase):
 
     def test_error_prompt_truncates_long_message(self):
         p = claude_handoff.build_error_prompt("z" * 5000)
-        self.assertLess(len(p), 1000)
-        self.assertTrue(p.endswith("..."))
+        self.assertLess(len(p), 800 + len(claude_handoff.NO_AUTO_CHANGES) + 300)
+        self.assertIn(" ...", p)                        # message body was cut
+        self.assertNotIn("z" * 900, p)
+
+    def test_prompts_forbid_auto_changes(self):
+        for p in (claude_handoff.build_error_prompt("x"),
+                  claude_handoff.build_prompt([{"account": "a", "sender": "s",
+                      "subject": "j", "folder_path": "f"}]),
+                  claude_handoff.build_receipt_prompt({"title": "t", "path": "p"})):
+            self.assertIn("do not make any changes", p.lower())
+            self.assertNotIn('"', p)
 
     def test_ask_claude_error_spawns_terminal(self):
         with mock.patch("claude_handoff.subprocess.Popen") as popen:
@@ -218,6 +227,52 @@ class TestAskClaudeError(unittest.TestCase):
             res = self._api().ask_claude_error("x")
         self.assertFalse(res["ok"])
         self.assertIn("nope", res["error"])
+
+    def test_ask_claude_receipt_spawns_terminal(self):
+        entry = {"title": "Amazon - USB hub", "path": "C:\\r\\x",
+                 "account": "ofek", "date": "25 Aug 2026"}
+        with mock.patch("claude_handoff.subprocess.Popen") as popen:
+            res = self._api().ask_claude_receipt(entry)
+        self.assertTrue(res["ok"])
+        joined = " ".join(popen.call_args[0][0])
+        self.assertIn("claude", joined)
+        self.assertIn("Amazon - USB hub", joined)
+
+    def test_ask_claude_receipt_reports_failure(self):
+        with mock.patch("claude_handoff.subprocess.Popen", side_effect=OSError("nope")):
+            res = self._api().ask_claude_receipt({"title": "x"})
+        self.assertFalse(res["ok"])
+        self.assertIn("nope", res["error"])
+
+
+class TestPickFolder(unittest.TestCase):
+    def _api(self, dialog):
+        api = appmod.Api(scan_fn=lambda run_id, progress_cb: None)
+        api._window = mock.Mock()
+        api._window.create_file_dialog = dialog
+        return api
+
+    def test_returns_selected_path(self):
+        res = self._api(lambda *a, **k: ("C:\\Some\\Folder",)).pick_folder()
+        self.assertEqual(res, {"ok": True, "path": "C:\\Some\\Folder"})
+
+    def test_cancel_returns_null_path(self):
+        self.assertEqual(self._api(lambda *a, **k: None).pick_folder(),
+                         {"ok": True, "path": None})
+        self.assertEqual(self._api(lambda *a, **k: ()).pick_folder(),
+                         {"ok": True, "path": None})
+
+    def test_reports_failure(self):
+        def boom(*a, **k):
+            raise RuntimeError("no dialog")
+        res = self._api(boom).pick_folder()
+        self.assertFalse(res["ok"])
+        self.assertIn("no dialog", res["error"])
+
+    def test_no_window_is_graceful(self):
+        api = appmod.Api(scan_fn=lambda run_id, progress_cb: None)
+        res = api.pick_folder()
+        self.assertEqual(res, {"ok": True, "path": None})
 
 
 class TestAppVersion(unittest.TestCase):

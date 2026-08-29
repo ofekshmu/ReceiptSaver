@@ -220,5 +220,42 @@
     "product": "תלוש שכר",
     "category": null,
     "base_dir": "C:\\Users\\ofeks\\OneDrive\\Ofek\\Work\\Sternum\\משכורות"
+  },
+  {
+    "_comment": "auto-added from fallback 19fd66271a093e48",
+    "match_sender_contains": "sternum-sec.com",
+    "match_subject_contains": null,
+    "exclude": true
+  },
+  {
+    "_comment": "auto-added from fallback 19fe09a7e38b7f20",
+    "match_sender_contains": "sonolevi.co.il",
+    "match_subject_contains": "טעינת רכב",
+    "seller": "Sonol evi",
+    "product": "חשבונית",
+    "category": null
+  },
+  {
+    "_comment": "auto-added from fallback 19ffcce394715990",
+    "match_sender_contains": "super-pharm.co.il",
+    "match_subject_contains": null,
+    "seller": "סופר פארם",
+    "product": "חשבונית",
+    "category": null
+  },
+  {
+    "_comment": "מחסני חשמל — payngo.co.il / sales@payngo.co.il is a shared Matrix (Tafnit) mail platform used by many retailers, so the sender alone does NOT identify the seller. Confirm the seller by requiring the string 'מחסני חשמל' in the mail body. PDF attachment is the actual tax receipt.",
+    "match_sender_contains": "payngo.co.il",
+    "match_subject_contains": null,
+    "match_body_contains": "מחסני חשמל",
+    "seller": "מחסני חשמל",
+    "product": "הזמנה",
+    "category": null
+  },
+  {
+    "_comment": "auto-added from fallback 19fef81b769c5311",
+    "match_sender_contains": "mac.org.il",
+    "match_subject_contains": null,
+    "exclude": true
   }
 ]

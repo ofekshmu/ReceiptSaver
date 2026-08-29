@@ -101,6 +101,21 @@ class TestApplyDecision(unittest.TestCase):
         self.assertEqual(row["action"], "RESOLVED")
         self.assertEqual(row["seller"], "שופ")
         self.assertEqual(row["resolution"], "rule")
+        # resolve stamp on both the history row and the fallback-log entry
+        self.assertEqual(row["resolved_by"], "user")
+        self.assertRegex(row["resolved_at"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d$")
+        self.assertEqual(self._entry()["resolved_by"], "user")
+        self.assertEqual(self._entry()["resolved_at"], row["resolved_at"])
+
+    def test_resolved_by_override_is_recorded(self):
+        fallback_ops.apply_decision(self._entry(), {
+            "kind": "once", "seller": "שופ", "product": "חשבונית",
+            "category": None, "base_dir": None,
+            "match_sender_contains": "shop.co.il", "match_subject_contains": None,
+        }, resolved_by="claude", **self.paths)
+        row = json.loads(self.hist.read_text(encoding="utf-8"))[0]
+        self.assertEqual(row["resolved_by"], "claude")
+        self.assertEqual(self._entry()["resolved_by"], "claude")
 
     def test_once_decision_moves_without_writing_rule(self):
         fallback_ops.apply_decision(self._entry(), {
@@ -124,11 +139,102 @@ class TestApplyDecision(unittest.TestCase):
         cleanup = json.loads(self.clog.read_text(encoding="utf-8"))
         self.assertEqual(cleanup[-1]["action"], "DELETED")
         self.assertTrue(self._entry()["resolved"])
+        row = json.loads(self.hist.read_text(encoding="utf-8"))[0]
+        self.assertEqual(row["resolved_by"], "user")
+        self.assertRegex(row["resolved_at"], r"^\d{4}-\d\d-\d\dT")
 
     def test_skip_decision_is_noop(self):
         fallback_ops.apply_decision(self._entry(), {"kind": "skip"}, **self.paths)
         self.assertTrue(self.src.exists())
-        self.assertFalse(self._entry()["resolved"])
+
+
+class TestApplyDecisionCreatesHistoryRow(unittest.TestCase):
+    """A fallback with no pre-existing history row must still land in History
+    when the user resolves it (history.json here starts empty)."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.receipts = self.tmp / "קבלות"
+        self.manual = self.receipts / "_לטיפול ידני"
+        self.manual.mkdir(parents=True)
+        self.rules = self.tmp / "custom_rules.json"
+        self.rules.write_text("[]", encoding="utf-8")
+        self.flog = self.tmp / "fallback_log.json"
+        self.clog = self.tmp / "cleanup_log.json"
+        self.hist = self.tmp / "history.json"           # deliberately not created
+        self.src = self.manual / "2026_08_25 - who - mystery - ofek"
+        self.src.mkdir()
+        (self.src / "email.pdf").write_text("x", encoding="utf-8")
+        self.flog.write_text(json.dumps([{
+            "message_id": "m9", "account": "ofek", "account_email": "o@x.com",
+            "date": "2026_08_25", "sender": "who@shop.co.il", "subject": "mystery",
+            "folder_name": self.src.name, "folder_path": str(self.src), "resolved": False,
+        }], ensure_ascii=False), encoding="utf-8")
+        self.paths = dict(rules_path=self.rules, fallback_log_path=self.flog,
+                          cleanup_log_path=self.clog, history_path=self.hist,
+                          receipts_dir=self.receipts, manual_dir=self.manual)
+
+    def _entry(self):
+        return json.loads(self.flog.read_text(encoding="utf-8"))[0]
+
+    def _rows(self):
+        return json.loads(self.hist.read_text(encoding="utf-8"))
+
+    def test_rule_resolution_appends_history_row(self):
+        fallback_ops.apply_decision(self._entry(), {
+            "kind": "rule", "seller": "שופ", "product": "חשבונית", "category": None,
+            "base_dir": None, "match_sender_contains": "shop.co.il",
+            "match_subject_contains": None,
+        }, **self.paths)
+        rows = self._rows()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["id"], "ofek:m9")
+        self.assertEqual(rows[0]["action"], "RESOLVED")
+        self.assertEqual(rows[0]["resolution"], "rule")
+        self.assertEqual(rows[0]["seller"], "שופ")
+        self.assertEqual(rows[0]["subject"], "mystery")
+        self.assertTrue(rows[0]["folder_path"].endswith("שופ - חשבונית - ofek"))
+
+    def test_once_resolution_appends_history_row(self):
+        fallback_ops.apply_decision(self._entry(), {
+            "kind": "once", "seller": "שופ", "product": "חשבונית", "category": None,
+            "base_dir": None, "match_sender_contains": "shop.co.il",
+            "match_subject_contains": None,
+        }, **self.paths)
+        rows = self._rows()
+        self.assertEqual([r["id"] for r in rows], ["ofek:m9"])
+        self.assertEqual(rows[0]["resolution"], "once")
+
+    def test_exclude_resolution_appends_history_row(self):
+        fallback_ops.apply_decision(self._entry(), {
+            "kind": "exclude", "seller": None, "product": None, "category": None,
+            "base_dir": None, "match_sender_contains": "shop.co.il",
+            "match_subject_contains": None,
+        }, **self.paths)
+        rows = self._rows()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["action"], "RESOLVED")
+        self.assertEqual(rows[0]["resolution"], "exclude")
+        self.assertEqual(rows[0]["subject"], "mystery")
+
+    def test_skip_does_not_touch_history(self):
+        fallback_ops.apply_decision(self._entry(), {"kind": "skip"}, **self.paths)
+        self.assertFalse(self.hist.exists())
+
+    def test_existing_row_is_updated_not_duplicated(self):
+        self.hist.write_text(json.dumps([{
+            "id": "ofek:m9", "action": "FALLBACK", "seller": None,
+            "subject": "mystery", "folder_path": str(self.src),
+        }], ensure_ascii=False), encoding="utf-8")
+        fallback_ops.apply_decision(self._entry(), {
+            "kind": "once", "seller": "שופ", "product": "חשבונית", "category": None,
+            "base_dir": None, "match_sender_contains": "shop.co.il",
+            "match_subject_contains": None,
+        }, **self.paths)
+        rows = self._rows()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["action"], "RESOLVED")
+        self.assertEqual(rows[0]["seller"], "שופ")
 
 
 if __name__ == "__main__":

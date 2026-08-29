@@ -8,6 +8,7 @@ This file is overwritten each time Claude resolves a new batch of
 fallback emails — it reflects the most recent batch only.
 """
 
+import datetime
 import json
 import shutil
 from pathlib import Path
@@ -94,9 +95,12 @@ def main():
     # Mark all as resolved in fallback_log.json
     if FALLBACK_LOG_FILE.exists():
         entries = json.loads(FALLBACK_LOG_FILE.read_text(encoding="utf-8"))
+        now = datetime.datetime.now().isoformat(timespec="seconds")
         for entry in entries:
             if entry.get("message_id") in RESOLVED_IDS:
                 entry["resolved"] = True
+                entry["resolved_at"] = now
+                entry["resolved_by"] = "claude"
         FALLBACK_LOG_FILE.write_text(
             json.dumps(entries, ensure_ascii=False, indent=2),
             encoding="utf-8"

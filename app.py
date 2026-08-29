@@ -1,16 +1,22 @@
 """
 app.py
 ------
-Frameless pywebview window for Receipt Saver. Opens at login, drives the
-mailbox scan on a worker thread, streams progress into the page, serves the
-history and fallback data, and applies fallback decisions.
+Frameless pywebview window for Receipt Saver. Drives the mailbox scan on a
+worker thread, streams progress into the page, serves the history and
+fallback data, and applies fallback decisions.
 
-Run:  pythonw app.py
+The scan only starts automatically when launched with --autostart (the
+logon scheduled task registered by install_startup.py); a manual launch
+(desktop/Start Menu shortcut) opens idle and waits for the user to click
+"Run scan" so opening the app doesn't always trigger a mailbox scan.
+
+Run:  pythonw app.py [--autostart]
 """
 
 import json
 import os
 import re
+import sys
 import threading
 import datetime
 from pathlib import Path
@@ -27,6 +33,11 @@ SCRIPT_DIR        = Path(r"C:\Users\ofeks\Scripts\ReceiptSaver")
 UI_DIR            = SCRIPT_DIR / "ui"
 FALLBACK_LOG_FILE = SCRIPT_DIR / "fallback_log.json"
 LOG_FILE          = SCRIPT_DIR / "receipt_saver.log"
+# Measured with Playwright against ui/index.html: the titlebar (brand + tabs +
+# win-controls) needs ~550px before it starts clipping. This floor sits well
+# above that, with margin for font/DPI differences between engines — the
+# window can be shrunk, but not far enough to break the header.
+WIN_MIN_W, WIN_MIN_H = 820, 520
 
 
 def _log(msg: str) -> None:
@@ -195,6 +206,15 @@ class Api:
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
+    def ask_claude_receipt(self, entry: dict) -> dict:
+        """Open a `claude` terminal in the repo, seeded to help with one
+        Receipts-explorer entry (right-click an entry -> Ask Claude)."""
+        try:
+            claude_handoff.launch_receipt(entry or {})
+            return {"ok": True}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
     # -- misc ------------------------------------------------------------
     def open_folder(self, path: str) -> dict:
         try:
@@ -217,9 +237,6 @@ class Api:
         return ui_state.save(patch or {})
 
     # -- receipts search ------------------------------------------------
-    # NOTE: the Receipts tab now filters only the current folder (client-side
-    # in app.js). This recursive cross-root walk is kept for possible reuse
-    # but is no longer called by the UI.
     def search_receipts(self, query: str, limit: int = 200) -> dict:
         q = (query or "").strip().lower()
         if len(q) < 2:
@@ -367,6 +384,34 @@ class Api:
         except Exception:
             pass
 
+    def resize_by(self, dx, dy):
+        """Relative window resize, driven by a custom drag-grip in the corner —
+        the window is frameless (no OS border), so there's no native resize
+        handle. Keeps the top-left corner fixed, matching a bottom-right grip."""
+        if not self._window:
+            return
+        try:
+            from webview.window import FixPoint
+            new_w = max(WIN_MIN_W, int(self._window.width) + int(dx))
+            new_h = max(WIN_MIN_H, int(self._window.height) + int(dy))
+            self._window.resize(new_w, new_h, FixPoint.NORTH | FixPoint.WEST)
+        except Exception:
+            pass
+
+    def pick_folder(self) -> dict:
+        """Open the OS folder picker and return the chosen directory. Used by
+        the fallback form's "Destination root" dropdown to add a new route.
+        `path` is None when the user cancels (or there's no window yet)."""
+        if not self._window:
+            return {"ok": True, "path": None}
+        try:
+            import webview
+            picked = self._window.create_file_dialog(webview.FOLDER_DIALOG)
+            path = picked[0] if picked else None
+            return {"ok": True, "path": path}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
     def minimize(self):
         if self._window:
             self._window.minimize()
@@ -399,17 +444,23 @@ def _run():
     _log(f"pywebview ok (backend hint: {getattr(webview, 'platform', '?')})")
 
     # RECEIPT_SAVER_UI_DRYRUN=1 boots the window without touching any mailbox —
-    # used to smoke-test the UI. The scan reports "nothing new".
+    # used to smoke-test the UI. The scan reports "nothing new". Pass
+    # --autostart too if you want it to run automatically like a logon
+    # launch would, rather than opening idle for a manual "Run scan" click.
     if os.environ.get("RECEIPT_SAVER_UI_DRYRUN") == "1":
         api = Api(scan_fn=lambda run_id, progress_cb: {
             "run_id": run_id, "saved": 0, "fallback": 0, "excluded": 0, "records": []})
     else:
         api = Api()
 
+    saved = ui_state.load()
+    win_w = max(WIN_MIN_W, int(saved["win_w"]))
+    win_h = max(WIN_MIN_H, int(saved["win_h"]))
+
     try:
         scr = webview.screens[0]
-        win_x = max(0, (scr.width  - 980) // 2)
-        win_y = max(0, (scr.height - 680) // 2)
+        win_x = max(0, (scr.width  - win_w) // 2)
+        win_y = max(0, (scr.height - win_h) // 2)
     except Exception:
         win_x, win_y = 120, 120
 
@@ -417,14 +468,37 @@ def _run():
         "Receipt Saver",
         url=str(UI_DIR / "index.html"),
         js_api=api,
-        width=980, height=680, x=win_x, y=win_y,
-        frameless=True, easy_drag=False,
+        width=win_w, height=win_h, x=win_x, y=win_y,
+        min_size=(WIN_MIN_W, WIN_MIN_H),
+        frameless=True, easy_drag=False, resizable=True,
         background_color="#0f1115",
         on_top=True,   # surface above the other apps that launch at login
     )
     api._win_x, api._win_y = win_x, win_y
     api.bind(window)
-    _log(f"window created at ({win_x},{win_y})")
+    _log(f"window created at ({win_x},{win_y}) size {win_w}x{win_h}")
+
+    # Debounced: a drag-to-resize fires many events, so only persist the
+    # final size once the user has stopped dragging for a moment.
+    _resize_timer = None
+
+    def _on_resized(width, height):
+        nonlocal _resize_timer
+        if _resize_timer is not None:
+            _resize_timer.cancel()
+
+        def _save():
+            try:
+                ui_state.save({"win_w": int(width), "win_h": int(height)})
+            except Exception:
+                pass
+        _resize_timer = threading.Timer(0.5, _save)
+        _resize_timer.daemon = True
+        _resize_timer.start()
+
+    window.events.resized += _on_resized
+
+    autostart = "--autostart" in sys.argv
 
     def _bootstrap():
         # Drop always-on-top once we're visible, but keep focus.
@@ -432,8 +506,11 @@ def _run():
             window.on_top = False
         except Exception:
             pass
-        _log("window shown — starting scan")
-        api.start_scan()
+        if autostart:
+            _log("window shown — starting scan (autostart)")
+            api.start_scan()
+        else:
+            _log("window shown — manual launch, waiting for user to start scan")
 
     try:
         import tray

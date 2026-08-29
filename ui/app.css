@@ -5,7 +5,10 @@
   font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
 }
 * { box-sizing: border-box; }
-html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); }
+/* The window has a hard minimum size (app.py's WIN_MIN_W/H) sized so the
+   titlebar and toolbars never need to clip — this is a belt-and-suspenders
+   guarantee that no horizontal scrollbar can ever appear regardless. */
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); overflow-x: hidden; }
 body { display: flex; flex-direction: column; font-size: 14px; }
 
 .titlebar {
@@ -21,10 +24,15 @@ body { display: flex; flex-direction: column; font-size: 14px; }
 }
 .tabs { display: flex; gap: 4px; }
 .tab {
-  background: transparent; color: var(--muted); border: 0; padding: 6px 12px;
-  border-radius: 8px; cursor: pointer; font-size: 13px;
+  position: relative; background: transparent; color: var(--muted); border: 0;
+  padding: 6px 12px; border-radius: 8px; cursor: pointer; font-size: 13px;
 }
 .tab.active { background: var(--panel-2); color: var(--text); }
+/* Faded separators between tabs — they read as too merged-together without them. */
+.tab:not(:last-child)::after {
+  content: ""; position: absolute; top: 50%; right: -3px; transform: translateY(-50%);
+  width: 1px; height: 16px; background: var(--line);
+}
 .badge {
   display: inline-block; min-width: 18px; text-align: center; font-size: 11px;
   background: var(--warn); color: #1a1a1a; border-radius: 9px; padding: 0 5px;
@@ -41,6 +49,14 @@ main { flex: 1; overflow: hidden; position: relative; }
 .view.active { display: block; }
 
 .summary { color: var(--muted); margin-bottom: 12px; min-height: 18px; }
+
+.run-prompt { text-align: center; margin-top: 60px; color: var(--muted); }
+.run-prompt p { margin: 0 0 14px; }
+.run-prompt button {
+  background: var(--accent); color: #fff; border: 0; font-size: 13px;
+  padding: 9px 20px; border-radius: 8px; cursor: pointer;
+}
+.run-prompt button:hover { filter: brightness(1.08); }
 
 #run-accounts { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
 #run-accounts:empty { display: none; }
@@ -64,6 +80,16 @@ main { flex: 1; overflow: hidden; position: relative; }
 .chip { background: var(--panel-2); border-radius: 6px; padding: 2px 7px; }
 .open-folder, .open-pdf { color: var(--accent); text-decoration: none; }
 .open-folder:hover, .open-pdf:hover { text-decoration: underline; }
+/* Icon-only folder glyph (History / This run cards, Fallbacks tab) instead of
+   an "Open folder" text link — underline doesn't read well on an icon. */
+.card-meta .open-folder,
+.fb-links .open-folder, .fb-compact .open-folder {
+  display: inline-flex; align-items: center; text-decoration: none;
+}
+.card-meta .open-folder:hover,
+.fb-links .open-folder:hover, .fb-compact .open-folder:hover {
+  color: var(--text); text-decoration: none;
+}
 
 .pill {
   font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 999px;
@@ -92,6 +118,11 @@ main { flex: 1; overflow: hidden; position: relative; }
   border-radius: 8px; cursor: pointer; margin-inline-end: 8px;
 }
 #fb-viewtoggle:hover { color: var(--text); }
+#fb-handoff {
+  display: inline-flex; align-items: center; gap: 5px; padding: 8px 12px;
+}
+#fb-handoff .claude-mark { color: #d97757; }
+#fb-handoff:disabled .claude-mark { color: var(--muted); }
 .card.fb-compact { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 10px; }
 .card.fb-compact .card-main { flex: 1 1 240px; cursor: pointer; }
 .fb-expand {
@@ -116,7 +147,8 @@ main { flex: 1; overflow: hidden; position: relative; }
 .opt-desc { color: var(--muted); font-size: 12px; line-height: 1.4; margin-inline-start: 22px; }
 
 .fb-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; margin: 6px 0; }
-.field { display: flex; flex-direction: column; gap: 3px; }
+.field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.fb-fields select.f-basedir { max-width: 100%; }
 .field > label { color: var(--text); font-size: 12px; font-weight: 500; }
 .field .hint { color: var(--muted); font-size: 11px; line-height: 1.35; }
 .fb-fields input, .fb-fields select {
@@ -140,6 +172,15 @@ main { flex: 1; overflow: hidden; position: relative; }
 .toast .toast-msg { flex: 1; min-width: 0; word-break: break-word; }
 .toast.error { border-left-color: var(--bad); }
 
+/* Frameless windows have no OS resize border, so this grip drives
+   Api.resize_by (see app.js) to let the bottom-right corner be dragged. */
+#win-resize-grip {
+  position: fixed; right: 0; bottom: 0; width: 14px; height: 14px;
+  cursor: nwse-resize; z-index: 60; touch-action: none;
+  background: linear-gradient(135deg, transparent 50%, var(--line) 50%);
+}
+#win-resize-grip:hover { background: linear-gradient(135deg, transparent 50%, var(--accent) 50%); }
+
 .ask-claude {
   flex: none; display: inline-flex; align-items: center; gap: 4px;
   background: var(--panel); color: var(--muted);
@@ -149,7 +190,24 @@ main { flex: 1; overflow: hidden; position: relative; }
 .ask-claude:hover:not(:disabled) { color: var(--text); border-color: var(--accent); }
 .ask-claude:disabled { opacity: .5; cursor: default; }
 .ask-claude svg { flex: none; color: #d97757; }
+.ask-claude.icon-only { padding: 5px 6px; }
 .rx-empty .ask-claude { margin-left: 6px; vertical-align: middle; }
+
+/* Right-click menu for Receipts explorer rows (rxContextMenu in app.js). */
+#rx-ctx-menu {
+  position: fixed; z-index: 70; min-width: 140px; padding: 4px;
+  background: var(--panel-2); border: 1px solid var(--line);
+  border-radius: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, .45);
+}
+#rx-ctx-menu[hidden] { display: none; }
+.rx-ctx-item {
+  display: flex; align-items: center; gap: 7px; width: 100%;
+  background: none; border: 0; border-radius: 5px;
+  padding: 7px 9px; font-size: 12px; color: var(--text);
+  text-align: left; cursor: pointer;
+}
+.rx-ctx-item:hover { background: var(--panel); }
+.rx-ctx-item svg { flex: none; color: #d97757; }
 
 /* ---- Receipts explorer ---- */
 #view-receipts.view.active { display: flex; gap: 0; padding: 0; }
@@ -171,23 +229,28 @@ main { flex: 1; overflow: hidden; position: relative; }
   display: flex; align-items: center; gap: 8px; padding: 10px 14px;
   border-bottom: 1px solid var(--line);
 }
-.rx-crumb-trail { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 2px; }
+.rx-crumb-trail { flex: 1; min-width: 0; display: flex; flex-wrap: nowrap; align-items: center; gap: 2px; overflow: hidden; }
 .rx-crumb {
   background: transparent; border: 0; color: var(--accent); cursor: pointer;
   font-size: 13px; padding: 2px 4px; border-radius: 5px;
+  flex: 0 1 auto; min-width: 0; max-width: 320px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .rx-crumb:hover { background: var(--panel-2); }
-.rx-crumb.here { color: var(--text); cursor: default; }
-.rx-sep { color: var(--muted); font-size: 12px; }
+.rx-crumb.here { color: var(--text); cursor: default; flex: 1 1 auto; }
+.rx-sep { flex: none; color: var(--muted); font-size: 12px; }
 #rx-open {
-  flex: none; background: var(--panel-2); color: var(--muted); border: 0;
-  padding: 6px 10px; border-radius: 7px; cursor: pointer; font-size: 12px;
+  flex: none; display: flex; align-items: center; justify-content: center;
+  background: var(--panel-2); color: var(--muted); border: 0;
+  padding: 7px 11px; border-radius: 7px; cursor: pointer;
 }
 #rx-open:hover { color: var(--text); }
+#rx-open svg { display: block; }
 
 #rx-back {
   flex: none; background: var(--panel-2); color: var(--muted); border: 0;
-  padding: 6px 10px; border-radius: 7px; cursor: pointer; font-size: 12px;
+  padding: 6px 12px; border-radius: 7px; cursor: pointer; font-size: 15px;
+  font-weight: 600; line-height: 1;
 }
 #rx-back:hover:not(:disabled) { color: var(--text); }
 #rx-back:disabled { opacity: .4; cursor: default; }
@@ -208,8 +271,11 @@ main { flex: 1; overflow: hidden; position: relative; }
 }
 .rx-row:hover, .rx-row:focus { background: #232834; outline: none; }
 .rx-row.dir { cursor: pointer; }
-.rx-glyph { flex: none; width: 18px; text-align: center; }
+/* Color emoji glyphs read as too playful against the app's dark, monochrome
+   UI — desaturate them so they sit as plain line icons instead. */
+.rx-glyph { flex: none; width: 18px; text-align: center; filter: grayscale(1); }
 .rx-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rx-subpath { display: block; color: var(--muted); font-size: 11px; margin-top: 2px; }
 .rx-meta { flex: none; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
 .rx-date { white-space: nowrap; }
 .rx-acct {
@@ -220,6 +286,12 @@ main { flex: 1; overflow: hidden; position: relative; }
 .rx-empty { color: var(--muted); text-align: center; margin-top: 40px; }
 
 .rx-root-wrap { position: relative; display: flex; align-items: center; }
+/* Faded separators between root entries — same idea as the tab dividers above. */
+.rx-root-wrap:not(:first-child)::before {
+  content: ""; display: block; position: absolute; top: -2px; left: 6px; right: 6px;
+  height: 1px;
+  background: linear-gradient(to right, transparent, var(--line), transparent);
+}
 .rx-root-wrap .rx-root { flex: 1; }
 .rx-root-toggle {
   position: absolute; inset-inline-end: 4px; border: 0; background: transparent;
@@ -241,3 +313,4 @@ main { flex: 1; overflow: hidden; position: relative; }
   border: 1px solid var(--line); background: var(--panel-2); color: var(--text);
 }
 .rx-searching #rx-search { border-color: var(--accent); }
+.rx-searching #rx-open { display: none; }

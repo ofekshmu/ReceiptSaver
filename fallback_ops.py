@@ -160,27 +160,51 @@ def _append_json_list(path: Path, item: dict) -> None:
     _atomic_write_json(path, rows)
 
 
-def _mark_resolved(fallback_log_path: Path, message_id: str, new_path: str) -> None:
+def _mark_resolved(fallback_log_path: Path, message_id: str, new_path: str,
+                   resolved_at: str = None, resolved_by: str = None) -> None:
     rows = json.loads(Path(fallback_log_path).read_text(encoding="utf-8"))
     for r in rows:
         if r.get("message_id") == message_id:
             r["resolved"] = True
             if new_path:
                 r["folder_path"] = new_path
+            if resolved_at:
+                r["resolved_at"] = resolved_at
+            if resolved_by:
+                r["resolved_by"] = resolved_by
     _atomic_write_json(fallback_log_path, rows)
 
 
 def apply_decision(entry: dict, decision: dict, *,
                    rules_path: Path = None, fallback_log_path: Path = None,
                    cleanup_log_path: Path = None, history_path: Path = None,
-                   receipts_dir: Path = None, manual_dir: Path = None) -> dict:
+                   receipts_dir: Path = None, manual_dir: Path = None,
+                   resolved_by: str = "user") -> dict:
     rules_path        = rules_path or CUSTOM_RULES_FILE
     fallback_log_path = fallback_log_path or FALLBACK_LOG_FILE
     cleanup_log_path  = cleanup_log_path or CLEANUP_LOG_FILE
     receipts_dir      = Path(receipts_dir or RECEIPTS_DIR)
+    import datetime as _dt
     src = Path(entry["folder_path"])
     rec_id = f'{entry["account"]}:{entry["message_id"]}'
     kind = decision.get("kind")
+    resolved_at = _dt.datetime.now().isoformat(timespec="seconds")
+
+    def _history_base() -> dict:
+        """Fields to seed a history row from the fallback entry, so resolving a
+        fallback that was never recorded during a scan still shows in History."""
+        return {
+            "id": rec_id,
+            "account": entry.get("account"),
+            "account_email": entry.get("account_email", ""),
+            "date": entry.get("date"),
+            "sender": entry.get("sender"),
+            "subject": entry.get("subject"),
+            "folder_name": entry.get("folder_name"),
+            "folder_path": entry.get("folder_path"),
+            "resolved_at": resolved_at,
+            "resolved_by": resolved_by,
+        }
 
     if kind == "skip":
         return {"ok": True, "kind": "skip"}
@@ -193,13 +217,14 @@ def apply_decision(entry: dict, decision: dict, *,
         _append_json_list(rules_path, rule)
         if src.exists():
             shutil.rmtree(src, ignore_errors=True)
-        import datetime as _dt
         _append_json_list(cleanup_log_path, {
             "action": "DELETED", "folder": entry["folder_name"],
             "reason": f'excluded via fallback UI ({decision["match_sender_contains"]})',
             "timestamp": _dt.datetime.now().isoformat()})
-        _mark_resolved(fallback_log_path, entry["message_id"], "")
-        history.update(rec_id, {"action": "RESOLVED", "resolution": "exclude"},
+        _mark_resolved(fallback_log_path, entry["message_id"], "",
+                       resolved_at=resolved_at, resolved_by=resolved_by)
+        history.upsert(rec_id, {**_history_base(),
+                                "action": "RESOLVED", "resolution": "exclude"},
                        path=history_path)
         return {"ok": True, "kind": "exclude"}
 
@@ -215,8 +240,10 @@ def apply_decision(entry: dict, decision: dict, *,
             rule["base_dir"] = decision["base_dir"]
         _append_json_list(rules_path, rule)
     moved = _move_folder(src, dst) if src.exists() else dst
-    _mark_resolved(fallback_log_path, entry["message_id"], str(moved))
-    history.update(rec_id, {
+    _mark_resolved(fallback_log_path, entry["message_id"], str(moved),
+                   resolved_at=resolved_at, resolved_by=resolved_by)
+    history.upsert(rec_id, {
+        **_history_base(),
         "action": "RESOLVED", "resolution": kind,
         "seller": decision["seller"], "product": decision["product"],
         "category": decision.get("category"),

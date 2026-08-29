@@ -23,12 +23,25 @@ $$(".tab").forEach(t => t.addEventListener("click", () => {
 // ---- window dragging -------------------------------------------------
 // This webview reports screenX/Y window-relative, so absolute math drifts.
 // Use origin-independent pointer deltas and let Python keep the position.
+//
+// Backpressure, not requestAnimationFrame: each `move_by` is a JS<->Python
+// bridge round-trip that can take longer than a frame. Firing one per frame
+// regardless lets stale calls queue up, so the window replays a backlog and
+// trails the cursor by a gap that grows with the drag. Instead we keep at
+// most one call in flight; movement that arrives while it's pending just
+// accumulates, and the next call sends the whole delta at once — so the
+// window stays one (constant) IPC latency behind the mouse, no worse.
 (function enableDrag() {
   const bar = $(".titlebar");
-  let dragging = false, dx = 0, dy = 0, raf = 0;
-  const flush = () => {
-    raf = 0;
-    if (dx || dy) { api().move_by(Math.round(dx), Math.round(dy)); dx = dy = 0; }
+  let dragging = false, dx = 0, dy = 0, inflight = false;
+  const pump = () => {
+    if (inflight || (!dx && !dy)) return;
+    const sx = Math.round(dx), sy = Math.round(dy);
+    dx -= sx; dy -= sy;                       // carry the sub-pixel remainder
+    inflight = true;
+    Promise.resolve(api().move_by(sx, sy))
+      .catch(() => {})
+      .finally(() => { inflight = false; pump(); });
   };
   bar.addEventListener("pointerdown", e => {
     if (e.button !== 0 || e.target.closest("button, .tab")) return;
@@ -38,14 +51,50 @@ $$(".tab").forEach(t => t.addEventListener("click", () => {
   bar.addEventListener("pointermove", e => {
     if (!dragging) return;
     dx += e.movementX; dy += e.movementY;
-    if (!raf) raf = requestAnimationFrame(flush);
+    pump();
   });
   const end = e => {
     dragging = false;
     try { bar.releasePointerCapture(e.pointerId); } catch (_) {}
+    pump();                                   // flush the final remainder
   };
   bar.addEventListener("pointerup", end);
   bar.addEventListener("pointercancel", end);
+})();
+
+// ---- window resizing ---------------------------------------------------
+// Frameless window = no OS resize border, so this corner grip drives
+// Api.resize_by with the same origin-independent pointer-delta approach
+// as the titlebar drag above.
+(function enableResize() {
+  const grip = $("#win-resize-grip");
+  let dragging = false, dx = 0, dy = 0, inflight = false;
+  const pump = () => {                        // same backpressure as the drag
+    if (inflight || (!dx && !dy)) return;
+    const sx = Math.round(dx), sy = Math.round(dy);
+    dx -= sx; dy -= sy;
+    inflight = true;
+    Promise.resolve(api().resize_by(sx, sy))
+      .catch(() => {})
+      .finally(() => { inflight = false; pump(); });
+  };
+  grip.addEventListener("pointerdown", e => {
+    if (e.button !== 0) return;
+    dragging = true; dx = dy = 0;
+    try { grip.setPointerCapture(e.pointerId); } catch (_) {}
+  });
+  grip.addEventListener("pointermove", e => {
+    if (!dragging) return;
+    dx += e.movementX; dy += e.movementY;
+    pump();
+  });
+  const end = e => {
+    dragging = false;
+    try { grip.releasePointerCapture(e.pointerId); } catch (_) {}
+    pump();
+  };
+  grip.addEventListener("pointerup", end);
+  grip.addEventListener("pointercancel", end);
 })();
 
 $("#btn-min").addEventListener("click", () => api().minimize());
@@ -64,8 +113,14 @@ function card(rec) {
   pill.classList.add((rec.action || "info").toLowerCase());
   $(".card-title", n).textContent =
     rec.seller ? `${rec.seller} · ${rec.product || ""}` : (rec.subject || "(no subject)");
-  $(".card-sub", n).textContent =
-    rec.seller ? (rec.subject || "") : (rec.sender || "");
+  const sub = $(".card-sub", n);
+  sub.textContent = rec.seller ? (rec.subject || "") : (rec.sender || "");
+  if (rec.resolved_at) {
+    const who = { user: "you", claude: "Claude", unknown: "backfill" }[rec.resolved_by]
+              || rec.resolved_by || "backfill";
+    sub.textContent = (sub.textContent ? sub.textContent + " · " : "")
+                    + `resolved ${String(rec.resolved_at).slice(0, 10)} by ${who}`;
+  }
   $(".chip.account", n).textContent = rec.account || "";
   $(".date", n).textContent = (rec.date || "").replace(/_/g, "-");
   const link = $(".open-folder", n);
@@ -81,11 +136,46 @@ const runAccts = new Map();  // label -> {state, detail}
 const RA_DOT = { connecting: "◌", scanning: "◌", done: "✓", failed: "⚠" };
 
 function resetRunView() {
+  $("#run-prompt").hidden = true;
   $("#run-list").innerHTML = "";
   $("#run-accounts").innerHTML = "";
   runAccts.clear();
   $("#run-summary").textContent = "Scanning…";
   $("#run-empty").hidden = true;
+}
+
+// Shown on a manual launch, before the user has kicked off a scan.
+function showRunPrompt() {
+  $("#run-prompt").hidden = false;
+  $("#run-list").innerHTML = "";
+  $("#run-accounts").innerHTML = "";
+  runAccts.clear();
+  $("#run-summary").textContent = "";
+  $("#run-empty").hidden = true;
+}
+
+$("#run-start").addEventListener("click", async () => {
+  const r = await api().start_scan();
+  if (r.status === "busy") toast("A scan is already running.");
+  else resetRunView();
+});
+
+// On launch, reflect whatever Api.get_run() already knows: idle (manual
+// launch, waiting for the user), running (autostart already kicked off the
+// scan), or done/error (rare — a very fast autostart scan beat page load).
+async function initRunView() {
+  let run;
+  try { run = await api().get_run(); } catch (_) { run = { status: "idle" }; }
+  if (run.status === "idle") {
+    showRunPrompt();
+  } else if (run.status === "running") {
+    resetRunView();
+  } else {
+    resetRunView();
+    const last = [...(run.events || [])].reverse().find(e => e.type === "done")
+               || { status: run.status, ...(run.summary || {}) };
+    renderRunDone(last);
+  }
 }
 
 function runSetAccount(label, state, detail) {
@@ -193,6 +283,16 @@ async function loadHistory() {
   histRows = histRows.concat(page);
   renderHistory();
 }
+// Drop the cached page state and re-fetch from the top. Called after a
+// fallback is resolved so its new RESOLVED row appears without reopening
+// the window. No-op-safe if the History tab was never opened.
+async function refreshHistory() {
+  if (histLoading) return;
+  histOffset = 0; histDone = false; histRows = [];
+  await loadHistory();
+  renderHistory();
+}
+
 function renderHistory() {
   const q = $("#hist-search").value.trim().toLowerCase();
   const list = $("#hist-list");
@@ -233,15 +333,14 @@ $("#fb-viewtoggle").addEventListener("click", async () => {
 // one fallback (same handoff path as the multi-select button, list of one).
 function fallbackClaudeButton(it) {
   const b = document.createElement("button");
-  b.className = "ask-claude";
+  b.className = "ask-claude icon-only";
   b.type = "button";
   b.title = "Handle this fallback with Claude";
   b.innerHTML =
     '<svg viewBox="0 0 24 24" aria-hidden="true" width="13" height="13">' +
     '<path fill="currentColor" d="M12 1.5l1.9 5.1 5.1 1.9-5.1 1.9L12 15.5l-1.9-5.1L5 8.5l5.1-1.9z' +
     'M18.5 14l1 2.6 2.6 1-2.6 1-1 2.6-1-2.6-2.6-1 2.6-1z' +
-    'M5 15l.8 2 2 .8-2 .8L5 21.5l-.8-2-2-.8 2-.8z"/></svg>' +
-    '<span>Claude</span>';
+    'M5 15l.8 2 2 .8-2 .8L5 21.5l-.8-2-2-.8 2-.8z"/></svg>';
   b.addEventListener("click", async (e) => {
     e.stopPropagation();
     e.preventDefault();
@@ -268,6 +367,50 @@ function fbHeader(scope, it) {
   $(".fb-check", scope).addEventListener("change", updateHandoffButton);
 }
 
+// "Destination root" dropdown: the default קבלות, every known root, and a
+// "Choose a folder…" sentinel that opens the OS folder picker (Api.pick_folder)
+// and adds whatever you pick as a new, selected option.
+const FB_BROWSE = "__browse__";
+let FB_ROOTS = null;
+
+async function fillBasedirSelect(sel, current) {
+  if (!FB_ROOTS) {
+    try { FB_ROOTS = await api().list_roots(); } catch (_) { FB_ROOTS = []; }
+  }
+  const opt = (v, label) => {
+    const o = document.createElement("option");
+    o.value = v; o.textContent = label;
+    return o;
+  };
+  sel.innerHTML = "";
+  sel.appendChild(opt("", "קבלות (default)"));
+  const known = new Set();
+  for (const r of FB_ROOTS) {
+    known.add(r.path);
+    sel.appendChild(opt(r.path, `${r.label} — ${r.path}`));
+  }
+  if (current && !known.has(current)) sel.appendChild(opt(current, current));
+  sel.appendChild(opt(FB_BROWSE, "＋ Choose a folder…"));
+  sel.value = current || "";
+  let last = sel.value;
+  sel.addEventListener("change", async () => {
+    if (sel.value !== FB_BROWSE) { last = sel.value; return; }
+    let res;
+    try { res = await api().pick_folder(); } catch (_) { res = { ok: false }; }
+    if (res && res.ok && res.path) {
+      if (![...sel.options].some(o => o.value === res.path)) {
+        sel.insertBefore(opt(res.path, res.path),
+                         sel.querySelector(`option[value="${FB_BROWSE}"]`));
+      }
+      sel.value = res.path;
+      last = res.path;
+    } else {
+      sel.value = last;                 // cancelled — restore previous choice
+      if (res && !res.ok) toast((res && res.error) || "Couldn't open folder picker", true);
+    }
+  });
+}
+
 function wireForm(scope, it, s) {
   const sel = $(".f-category", scope);
   sel.innerHTML = `<option value="">no category</option>` +
@@ -275,6 +418,7 @@ function wireForm(scope, it, s) {
   $(".f-seller", scope).value = s.seller || "";
   $(".f-product", scope).value = s.product || "";
   if (s.category) sel.value = s.category;
+  fillBasedirSelect($(".f-basedir", scope), s.base_dir || "");
   $(".f-sender", scope).value = s.match_sender_contains || "";
   if (s.kind) {
     const r = scope.querySelector(`.fb-form input[value="${s.kind}"]`);
@@ -288,7 +432,7 @@ function wireForm(scope, it, s) {
       seller: $(".f-seller", form).value.trim(),
       product: $(".f-product", form).value.trim(),
       category: $(".f-category", form).value || null,
-      base_dir: $(".f-basedir", form).value.trim() || null,
+      base_dir: (v => v && v !== FB_BROWSE ? v : null)($(".f-basedir", form).value.trim()),
       match_sender_contains: $(".f-sender", form).value.trim(),
       match_subject_contains: $(".f-subject", form).value.trim() || null,
     };
@@ -297,6 +441,7 @@ function wireForm(scope, it, s) {
       form.closest(".card").remove();
       toast(`Resolved: ${decision.seller || it.subject}`);
       loadFallbacks();
+      refreshHistory();          // so the new RESOLVED row shows without reopening
     } else {
       toast((res && res.error) || "Failed to apply", true);
     }
@@ -410,7 +555,7 @@ let rxRoots = [], rxCurrent = null, rxLoaded = false;
 let rxBackStack = [];
 let rxEntries = [];         // entries of the folder currently shown
 let rxSort = "date_desc";   // <name|date>_<asc|desc>
-const RX_GLYPH = { folder: "📁", "receipt-folder": "🧾", pdf: "📄", file: "▪" };
+const RX_GLYPH = { folder: "📁", "receipt-folder": "📁", pdf: "📄", file: "▪" };
 
 function humanSize(n) {
   if (n == null) return "";
@@ -427,6 +572,7 @@ function rxRowEl(e) {
   const row = n.querySelector(".rx-row");
   $(".rx-glyph", row).textContent = RX_GLYPH[e.kind] || RX_GLYPH.file;
   $(".rx-name", row).textContent = e.title || e.name;
+  row.title = e.path;
   const meta = $(".rx-meta", row);
   meta.textContent = "";
   if (e.date_display) {
@@ -444,6 +590,7 @@ function rxRowEl(e) {
     s.className = "rx-size"; s.textContent = humanSize(e.size);
     meta.appendChild(s);
   }
+  row._entry = e;                 // used by the right-click "Ask Claude" menu
   return { n, row };
 }
 
@@ -535,6 +682,7 @@ async function rxBrowse(path, opts = {}) {
     const b = document.createElement("button");
     b.className = "rx-crumb" + (i === arr.length - 1 ? " here" : "");
     b.textContent = c.name;
+    b.title = c.path;
     if (i < arr.length - 1) b.addEventListener("click", () => rxBrowse(c.path));
     trail.appendChild(b);
   });
@@ -617,7 +765,7 @@ function rxGoBack() {
   if (prev === undefined) return;
   rxUpdateBackBtn();
   const q = $("#rx-search");
-  if (q) q.value = "";
+  if (q && q.value) { q.value = ""; rxExitSearch({ noBrowse: true }); }
   rxBrowse(prev, { noHistory: true });
 }
 
@@ -660,7 +808,11 @@ async function rxSetSort(next) {
   rxRenderSortBtns();
   try { await api().set_ui_state({ rx_sort: rxSort }); } catch (_) {}
   const q = $("#rx-search");
-  rxRenderList(q && q.value.trim());
+  if ($("#view-receipts").classList.contains("rx-searching") && q && q.value.trim().length >= 2) {
+    rxSearch(q.value.trim());
+  } else if (rxCurrent) {
+    rxRenderList(q && q.value.trim());
+  }
 }
 
 $("#rx-back").addEventListener("click", rxGoBack);
@@ -683,11 +835,117 @@ let rxSearchTimer = 0;
 $("#rx-search").addEventListener("input", e => {
   clearTimeout(rxSearchTimer);
   const q = e.target.value.trim();
-  rxSearchTimer = setTimeout(() => rxRenderList(q), 120);
+  rxSearchTimer = setTimeout(() => (q.length >= 2 ? rxSearch(q) : rxExitSearch()), 200);
 });
 
+// Recursive cross-root search (Api.search_receipts) — only while the search
+// box holds text; clearing it restores the plain current-folder listing.
+async function rxSearch(q) {
+  $("#view-receipts").classList.add("rx-searching");
+  const res = await api().search_receipts(q);
+  const trail = $(".rx-crumb-trail");
+  trail.innerHTML = "";
+  const label = document.createElement("span");
+  label.className = "rx-crumb here";
+  label.textContent = `Search "${q}" — ${res.results.length} result(s)` +
+    (res.truncated ? " (first 200)" : "");
+  trail.appendChild(label);
+
+  const list = $(".rx-list");
+  list.innerHTML = "";
+  const empty = $(".rx-empty");
+  if (!res.results.length) {
+    empty.hidden = false; empty.textContent = "No matches.";
+    return;
+  }
+  empty.hidden = true;
+  for (const e of rxSortEntries(res.results)) {
+    const { n, row } = rxRowEl(e);
+    const sub = document.createElement("span");
+    sub.className = "rx-subpath";
+    sub.textContent = `${e.root_label} / ${e.rel.split(/[\\/]/).slice(0, -1).join(" / ") || "."}`;
+    $(".rx-name", row).appendChild(sub);
+    if (e.is_dir) {
+      row.classList.add("dir");
+      row.addEventListener("click", () => { $("#rx-search").value = ""; rxExitSearch({ noBrowse: true }); rxBrowse(e.path); });
+    } else {
+      row.addEventListener("dblclick", () => api().open_path(e.path));
+    }
+    list.appendChild(n);
+  }
+}
+
+// Leave search mode. By default this re-browses the current folder to restore
+// the plain listing; pass { noBrowse: true } when the caller is about to
+// navigate somewhere else, so the two navigations don't race (the stale
+// re-browse would otherwise win and snap you back to the pre-search folder).
+function rxExitSearch(opts = {}) {
+  $("#view-receipts").classList.remove("rx-searching");
+  if (!opts.noBrowse && rxCurrent) rxBrowse(rxCurrent, { noHistory: true });
+}
+
+// ---- explorer: right-click "Ask Claude" menu -------------------------
+// Right-click any explorer row (folder or file, plain listing or search
+// results) to open a one-item menu; clicking "Ask Claude" opens a `claude`
+// terminal seeded with a prompt about that specific entry (Api.ask_claude_receipt).
+(function rxContextMenu() {
+  const menu = $("#rx-ctx-menu");
+  if (!menu) return;
+  let target = null;                       // the row's stashed entry
+
+  const hide = () => { menu.hidden = true; target = null; };
+
+  const show = (x, y, entry) => {
+    target = entry;
+    menu.hidden = false;
+    // Clamp to the viewport so the menu never opens off-screen.
+    const r = menu.getBoundingClientRect();
+    const px = Math.min(x, window.innerWidth  - r.width  - 6);
+    const py = Math.min(y, window.innerHeight - r.height - 6);
+    menu.style.left = Math.max(6, px) + "px";
+    menu.style.top  = Math.max(6, py) + "px";
+  };
+
+  $(".rx-list").addEventListener("contextmenu", e => {
+    const row = e.target.closest(".rx-row");
+    if (!row || !row._entry) return;
+    e.preventDefault();
+    show(e.clientX, e.clientY, row._entry);
+  });
+
+  menu.addEventListener("click", async e => {
+    const item = e.target.closest(".rx-ctx-item");
+    if (!item || !target) return;
+    const entry = target;
+    hide();
+    if (item.dataset.act === "ask-claude") {
+      let res;
+      try {
+        res = await api().ask_claude_receipt({
+          title:   entry.title || entry.parsed && entry.parsed.title || "",
+          name:    entry.name || "",
+          path:    entry.path || "",
+          account: entry.account || "",
+          date:    entry.date_display || "",
+        });
+      } catch (_) { res = { ok: false }; }
+      toast(res && res.ok ? "Opening Claude…"
+                          : (res && res.error) || "Couldn't open Claude",
+            !(res && res.ok));
+    }
+  });
+
+  // Dismiss on anything that would make the anchored position stale.
+  window.addEventListener("pointerdown", e => {
+    if (!menu.hidden && !menu.contains(e.target)) hide();
+  });
+  window.addEventListener("keydown", e => { if (e.key === "Escape") hide(); });
+  window.addEventListener("blur", hide);
+  document.addEventListener("scroll", () => { if (!menu.hidden) hide(); }, true);
+})();
+
 window.addEventListener("pywebviewready", () => {
-  resetRunView();
+  initRunView();
   refreshBadge();
   showVersion();
 });
