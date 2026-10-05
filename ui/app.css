@@ -152,8 +152,33 @@ main { flex: 1; overflow: hidden; position: relative; }
 }
 .fb-fields :disabled { opacity: .55; cursor: not-allowed; }
 
+/* searchable combobox — fallback "File under a category" picker */
+.combo { position: relative; display: inline-block; min-width: 240px; max-width: 100%; }
+.combo-input { width: 100%; }
+.combo-list {
+  position: absolute; z-index: 20; left: 0; right: 0; top: calc(100% + 2px);
+  margin: 0; padding: 4px; list-style: none; max-height: 200px; overflow-y: auto;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .35);
+}
+.combo-list li {
+  padding: 6px 8px; border-radius: 5px; font-size: 12px; color: var(--text);
+  cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.combo-list li.is-active { background: var(--panel-2); }
+.combo-list li.is-current { color: var(--accent); }
+.combo-list li:first-child { position: sticky; top: 0; background: var(--panel); }
+.combo-list li:first-child.is-active { background: var(--panel-2); }
+.combo-empty { color: var(--muted); cursor: default !important; }
+
 .fb-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; margin: 6px 0; }
+.fb-fields[hidden] { display: none; }
+.fb-fields-head {
+  grid-column: 1 / -1; color: var(--muted); font-size: 11px;
+  text-transform: uppercase; letter-spacing: .5px; margin-bottom: -2px;
+}
 .field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.field[hidden] { display: none; }
 .fb-fields select.f-basedir { max-width: 100%; }
 .field > label { color: var(--text); font-size: 12px; font-weight: 500; }
 .field .hint { color: var(--muted); font-size: 11px; line-height: 1.35; }

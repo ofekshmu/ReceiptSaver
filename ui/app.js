@@ -309,8 +309,14 @@ new IntersectionObserver(es => {
 }).observe($("#hist-sentinel"));
 
 // ---- fallbacks view ----------------------------------------------------
+function fillSubfolderList() {
+  const dl = $("#fb-subfolders");
+  if (dl) dl.innerHTML = CATEGORIES.map(c => `<option value="${c}"></option>`).join("");
+}
+
 async function loadFallbacks() {
   if (!CATEGORIES.length) CATEGORIES = await api().categories();
+  fillSubfolderList();
   const st = await api().get_ui_state();
   fbSimple = !!st.fallbacks_simple;
   $("#fb-viewtoggle").textContent = fbSimple ? "Detailed view" : "Simple view";
@@ -412,68 +418,169 @@ async function fillBasedirSelect(sel, current) {
   });
 }
 
-// "File under a category" picker: ＋ New category… (sentinel) + one option per
+// Minimal searchable combobox over a fixed item list. `root` is a `.combo`
+// element holding `.combo-input` + `.combo-list`; the chosen value lives in
+// `root.dataset.value`. items: [{value, label}]. The first item stays pinned
+// (shown even when the current filter would exclude it). onChange(value) fires
+// only on an actual pick, never on mere typing.
+function makeCombo(root, { items, onChange }) {
+  const input = $(".combo-input", root);
+  const list = $(".combo-list", root);
+  let view = [];
+  let active = -1;
+
+  const labelFor = v => (items.find(it => it.value === v) || {}).label || "";
+  const curLabel = () => labelFor(root.dataset.value);
+
+  function render(q) {
+    const needle = (q || "").trim().toLowerCase();
+    view = items.filter((it, i) =>
+      i === 0 || !needle || it.label.toLowerCase().includes(needle));
+    list.innerHTML = "";
+    if (!view.length) {
+      const li = document.createElement("li");
+      li.className = "combo-empty";
+      li.textContent = "no match";
+      list.appendChild(li);
+      return;
+    }
+    view.forEach((it, i) => {
+      const li = document.createElement("li");
+      li.textContent = it.label;
+      if (i === active) li.classList.add("is-active");
+      if (it.value === root.dataset.value) li.classList.add("is-current");
+      li.addEventListener("mousedown", e => { e.preventDefault(); choose(it); });
+      list.appendChild(li);
+    });
+  }
+  function open() { render(input.value === curLabel() ? "" : input.value); list.hidden = false; }
+  function close() { list.hidden = true; active = -1; }
+  function choose(it) {
+    root.dataset.value = it.value;
+    input.value = it.label;
+    close();
+    onChange(it.value);
+  }
+
+  input.addEventListener("focus", () => { input.select(); open(); });
+  input.addEventListener("input", () => { active = -1; render(input.value); list.hidden = false; });
+  input.addEventListener("blur", () => {
+    setTimeout(() => { input.value = curLabel(); close(); }, 120);
+  });
+  input.addEventListener("keydown", e => {
+    if (list.hidden && (e.key === "ArrowDown" || e.key === "ArrowUp")) { open(); return; }
+    if (e.key === "ArrowDown") { active = Math.min(active + 1, view.length - 1); render(input.value); e.preventDefault(); }
+    else if (e.key === "ArrowUp") { active = Math.max(active - 1, 0); render(input.value); e.preventDefault(); }
+    else if (e.key === "Enter") {
+      // while the popup is open, Enter picks (never submits the form)
+      if (!list.hidden) { e.preventDefault(); const pick = view[active] || view[0]; if (pick) choose(pick); }
+    }
+    else if (e.key === "Escape") { input.value = curLabel(); close(); }
+  });
+
+  return { setValue(v) { root.dataset.value = v; input.value = labelFor(v); } };
+}
+
+// "File under a category" picker: ＋ New category… (sentinel) + one entry per
 // existing category. Picking an existing one prefills seller/product (editable
 // per-bill overrides) and pins the route/subfolder to that category.
 const FB_NEWCAT = "__new__";
 let FB_CATS = null;
 
 async function fillCatAssign(scope, s) {
-  const sel = $(".f-cat-assign", scope);
-  if (!sel) return;
+  const root = $(".f-cat-assign", scope);
+  if (!root) return;
   if (!FB_CATS) {
     try { FB_CATS = await api().list_categories(); } catch (_) { FB_CATS = []; }
   }
   const nameInput = $(".f-cat-name", scope);
-  const subSel = $(".f-category", scope);
+  const subEl = $(".f-category", scope);
   const baseSel = $(".f-basedir", scope);
-  sel.innerHTML = "";
-  const add = (v, label) => {
-    const o = document.createElement("option");
-    o.value = v; o.textContent = label; sel.appendChild(o);
-  };
-  add(FB_NEWCAT, "＋ New category…");
-  FB_CATS.filter(c => !c.exclude).forEach(c =>
-    add(c.id, `${c.name}${c.subfolder ? " — " + c.subfolder : ""}`));
 
-  const apply = () => {
-    const isNew = sel.value === FB_NEWCAT;
-    nameInput.hidden = !isNew;
-    const cat = isNew ? null : FB_CATS.find(c => c.id === sel.value);
-    // an existing category owns the route + subfolder; a new one takes them from the form
-    for (const el of [subSel, baseSel]) if (el) el.disabled = !!cat;
+  const items = [{ value: FB_NEWCAT, label: "＋ New category…" }];
+  FB_CATS.filter(c => !c.exclude).forEach(c =>
+    items.push({ value: c.id, label: `${c.name}${c.subfolder ? " — " + c.subfolder : ""}` }));
+
+  const apply = val => {
+    const cat = val === FB_NEWCAT ? null : FB_CATS.find(c => c.id === val);
+    nameInput.hidden = !!cat;
+    // an existing category owns seller/product defaults + the route it prefills
     if (cat) {
       $(".f-seller", scope).value = cat.seller || "";
       $(".f-product", scope).value = cat.product || "";
-      if (subSel) subSel.value = cat.subfolder || "";
+      if (subEl) subEl.value = cat.subfolder || "";
       if (baseSel && ![...baseSel.options].some(o => o.value === (cat.base_dir || "")))
         baseSel.appendChild(Object.assign(document.createElement("option"),
           { value: cat.base_dir || "", textContent: cat.base_dir || "קבלות (default)" }));
       if (baseSel) baseSel.value = cat.base_dir || "";
     }
+    syncFieldsForKind(scope);
   };
-  sel.addEventListener("change", apply);
+
+  const combo = makeCombo(root, { items, onChange: apply });
   // preselect a category whose route matches the heuristic's category guess
   const guess = s.category
     ? FB_CATS.find(c => !c.exclude && c.subfolder === s.category) : null;
-  sel.value = guess ? guess.id : FB_NEWCAT;
-  apply();
+  combo.setValue(guess ? guess.id : FB_NEWCAT);
+  apply(root.dataset.value);
+}
+
+// Heading + pin/hide for the fields block, driven by the chosen radio and
+// (for "File under a category") whether an existing category or a new one is
+// picked. An existing category owns its route + match rules, so those fields
+// are shown read-only; seller/product stay editable as per-bill overrides.
+function syncFieldsForKind(scope) {
+  const kind = (scope.querySelector("input[name=kind]:checked") || {}).value;
+  const root = $(".f-cat-assign", scope);
+  const catVal = root ? root.dataset.value : "";
+  const fields = $(".fb-fields", scope);
+  const head = $(".fb-fields-head", scope);
+  const isNewCat = kind === "category" && catVal === FB_NEWCAT;
+  const existing = (kind === "category" && catVal && catVal !== FB_NEWCAT)
+    ? (FB_CATS || []).find(c => c.id === catVal) : null;
+
+  if (fields) fields.hidden = (kind === "exclude" || kind === "skip");
+  if (fields && fields.hidden) return;
+
+  if (head) {
+    head.textContent =
+      isNewCat        ? "New category — the fields below define it"
+    : existing        ? `Category: ${existing.name} — its route is fixed below`
+    : kind === "once" ? "This receipt only — no rule saved"
+    : "";
+    head.hidden = !head.textContent;
+  }
+
+  const dis = (sel, off) => { const el = $(sel, scope); if (el) el.disabled = off; };
+  const hide = (sel, hid) => {
+    const el = $(sel, scope);
+    const field = el && el.closest(".field");
+    if (field) field.hidden = hid;
+  };
+  dis(".f-seller", false);
+  dis(".f-product", false);
+  dis(".f-category", !!existing);
+  dis(".f-basedir", !!existing);
+  dis(".f-sender", !!existing);
+  dis(".f-subject", !!existing);
+  hide(".f-sender", kind === "once");
+  hide(".f-subject", kind === "once");
 }
 
 function wireForm(scope, it, s) {
-  const sel = $(".f-category", scope);
-  sel.innerHTML = `<option value="">no category</option>` +
-    CATEGORIES.map(c => `<option value="${c}">${c}</option>`).join("");
+  $(".f-category", scope).value = s.category || "";
   $(".f-seller", scope).value = s.seller || "";
   $(".f-product", scope).value = s.product || "";
-  if (s.category) sel.value = s.category;
   fillBasedirSelect($(".f-basedir", scope), s.base_dir || "");
   $(".f-sender", scope).value = s.match_sender_contains || "";
   if (s.kind) {
     const r = scope.querySelector(`.fb-form input[value="${s.kind}"]`);
     if (r) r.checked = true;
   }
+  scope.querySelectorAll("input[name=kind]").forEach(r =>
+    r.addEventListener("change", () => syncFieldsForKind(scope)));
   fillCatAssign(scope, s);
+  syncFieldsForKind(scope);
   $(".fb-form", scope).addEventListener("submit", async e => {
     e.preventDefault();
     const form = e.currentTarget;
@@ -489,7 +596,7 @@ function wireForm(scope, it, s) {
       match_subject_contains: $(".f-subject", form).value.trim() || null,
     };
     if (kind === "category") {
-      const pick = $(".f-cat-assign", form).value;
+      const pick = $(".f-cat-assign", form).dataset.value;
       if (pick === FB_NEWCAT) {
         decision.kind = "new_category";
         decision.category_name = $(".f-cat-name", form).value.trim();

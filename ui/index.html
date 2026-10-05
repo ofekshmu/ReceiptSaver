@@ -109,6 +109,8 @@
     </article>
   </template>
 
+  <datalist id="fb-subfolders"></datalist>
+
   <div id="toast-host"></div>
   <div id="win-resize-grip" title="Drag to resize"></div>
 
@@ -168,7 +170,12 @@
               <span class="opt-head"><input type="radio" name="kind" value="category" checked> File under a category</span>
               <span class="opt-desc">File this email now <b>and</b> add its sender to a category, so future emails like it file automatically to the same place.</span>
               <span class="opt-body">
-                <select class="f-cat-assign" title="Which category this sender belongs to"></select>
+                <div class="combo f-cat-assign" data-value="">
+                  <input class="combo-input" type="text" dir="auto" autocomplete="off"
+                         spellcheck="false" placeholder="Choose a category or type to search&hellip;"
+                         title="Which category this sender belongs to">
+                  <ul class="combo-list" hidden></ul>
+                </div>
                 <input class="f-cat-name" type="text" dir="auto" hidden
                        placeholder="New category name (e.g. חשמל)">
               </span>
@@ -188,6 +195,7 @@
           </fieldset>
 
           <div class="fb-fields">
+            <div class="fb-fields-head" hidden></div>
             <div class="field">
               <label>Seller</label>
               <input class="f-seller" dir="auto"
@@ -201,10 +209,10 @@
               <span class="hint">What the receipt is for.</span>
             </div>
             <div class="field">
-              <label>Category</label>
-              <select class="f-category"
-                      title="Optional sub-folder under קבלות, for recurring utility bills. Leave as 'no category' for everything else."></select>
-              <span class="hint">Optional sub-folder under קבלות (utility bills only).</span>
+              <label>Sub-folder</label>
+              <input class="f-category" dir="auto" list="fb-subfolders" placeholder="(none)"
+                     title="Sub-folder under the destination root that groups related bills — e.g. חשבנות/חשמל. Every electricity category files here regardless of provider. Leave blank for none.">
+              <span class="hint">Folder under the destination root that groups related bills (e.g. חשבנות/חשמל).</span>
             </div>
             <div class="field">
               <label>Destination root</label>
