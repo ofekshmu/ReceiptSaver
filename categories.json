@@ -1,0 +1,607 @@
+[
+  {
+    "id": "cat-מקסברנר",
+    "name": "מקס ברנר",
+    "destination": "C:\\Users\\ofeks\\OneDrive\\Documents\\קבלות",
+    "seller": {
+      "mode": "fixed",
+      "value": "מקס ברנר"
+    },
+    "product": {
+      "mode": "fixed",
+      "value": "חשבונית"
+    },
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "morning.co",
+        "subject_contains": "מקס ברנר"
+      }
+    ]
+  },
+  {
+    "id": "cat-שירותהתשלומי",
+    "name": "שירות התשלומים הממשלתי",
+    "destination": "C:\\Users\\ofeks\\OneDrive\\Documents\\קבלות",
+    "seller": {
+      "mode": "fixed",
+      "value": "שירות התשלומים הממשלתי"
+    },
+    "product": {
+      "mode": "fixed",
+      "value": "תשלום"
+    },
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "ecom.gov.il"
+      }
+    ]
+  },
+  {
+    "id": "excluded",
+    "name": "(excluded)",
+    "destination": null,
+    "seller": null,
+    "product": null,
+    "exclude": true,
+    "match": [
+      {
+        "sender_contains": "haifa.muni.il",
+        "subject_contains": "שובר תשלום"
+      },
+      {
+        "sender_contains": "iec.co.il",
+        "subject_contains": "אישור הפעלת שירות"
+      },
+      {
+        "sender_contains": "webmaster@icmega.org"
+      },
+      {
+        "sender_contains": "mac.org.il"
+      }
+    ]
+  },
+  {
+    "id": "baby-land",
+    "name": "Baby Land",
+    "destination": "C:\\Users\\ofeks\\OneDrive\\Documents\\קבלות",
+    "seller": {
+      "mode": "fixed",
+      "value": "Baby Land"
+    },
+    "product": {
+      "mode": "fixed",
+      "value": "חשבונית"
+    },
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "tranzila.com",
+        "subject_contains": "baby-land"
+      }
+    ]
+  },
+  {
+    "id": "on-ev",
+    "name": "on-ev",
+    "destination": "C:\\Users\\ofeks\\OneDrive\\Documents\\קבלות",
+    "seller": {
+      "mode": "fixed",
+      "value": "on-ev"
+    },
+    "product": {
+      "mode": "fixed",
+      "value": "טעינה חשמלית"
+    },
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "mg.driivz.com"
+      }
+    ]
+  },
+  {
+    "id": "interactive-broker",
+    "name": "Interactive Broker",
+    "destination": "C:\\Users\\ofeks\\OneDrive\\Documents\\קבלות\\Interactive Broker",
+    "seller": {
+      "mode": "fixed",
+      "value": "Interactive Broker"
+    },
+    "product": {
+      "mode": "fixed",
+      "value": "אישור הפקדה"
+    },
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "inter-il.com"
+      }
+    ]
+  },
+  {
+    "id": "cat-עירייתראשוןל",
+    "name": "עיריית ראשון לציון",
+    "destination": "C:\\Users\\ofeks\\OneDrive\\Documents\\קבלות\\חשבנות\\ארנונה",
+    "seller": {
+      "mode": "fixed",
+      "value": "עיריית ראשון לציון"
+    },
+    "product": {
+      "mode": "fixed",
+      "value": "אישור תשלום"
+    },
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "ladpc.co.il"
+      }
+    ]
+  },
+  {
+    "id": "cat-עירייתחיפה",
+    "name": "עיריית חיפה",
+    "destination": "C:\\Users\\ofeks\\OneDrive\\Documents\\נכסים\\שלום שבאזי 7\\חשבנות\\ארנונה",
+    "seller": {
+      "mode": "fixed",
+      "value": "עיריית חיפה"
+    },
+    "product": {
+      "mode": "fixed",
+      "value": "קבלת תשלום"
+    },
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "חיפה"
+      }
+    ]
+  },
+  {
+    "id": "cat-ראשוןלציוןהח",
+    "name": "ראשון לציון החברה לב",
+    "destination": "C:\\Users\\ofeks\\OneDrive\\Documents\\קבלות\\חשבנות\\ארנונה",
+    "seller": {
+      "mode": "fixed",
+      "value": "ראשון לציון החברה לב"
+    },
+    "product": {
+      "mode": "fixed",
+      "value": "קבלת תשלום"
+    },
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "ראשון לציון"
+      }
+    ]
+  },
+  {
+    "id": "cat-יפנולוגי",
+    "name": "יפנולוגי",
+    "destination": "C:\\Users\\ofeks\\OneDrive\\Documents\\קבלות\\יפנולוגי",
+    "seller": {
+      "mode": "fixed",
+      "value": "יפנולוגי"
+    },
+    "product": {
+      "mode": "fixed",
+      "value": "חשבונית מס קבלה"
+    },
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "icount.co.il",
+        "subject_contains": "יפנולוגי"
+      }
+    ]
+  },
+  {
+    "id": "cat-אלקטרהפאוור",
+    "name": "אלקטרה פאוור",
+    "destination": "C:\\Users\\ofeks\\OneDrive\\Documents\\קבלות\\חשבנות\\חשמל",
+    "seller": {
+      "mode": "fixed",
+      "value": "אלקטרה פאוור"
+    },
+    "product": {
+      "mode": "fixed",
+      "value": "חשבונית חשמל"
+    },
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "electra-power.co.il"
+      }
+    ]
+  },
+  {
+    "id": "cat-פזגז",
+    "name": "פזגז",
+    "destination": "C:\\Users\\ofeks\\OneDrive\\Documents\\קבלות\\חשבנות\\גז",
+    "seller": {
+      "mode": "fixed",
+      "value": "פזגז"
+    },
+    "product": {
+      "mode": "fixed",
+      "value": "חשבונית גז"
+    },
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "printernet.co.il",
+        "subject_contains": "פזגז"
+      }
+    ]
+  },
+  {
+    "id": "cat-אלעל",
+    "name": "אל על",
+    "destination": "C:\\Users\\ofeks\\OneDrive\\Documents\\קבלות",
+    "seller": {
+      "mode": "fixed",
+      "value": "אל על"
+    },
+    "product": {
+      "mode": "fixed",
+      "value": "כרטיס טיסה"
+    },
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "elalinfo.co.il"
+      }
+    ]
+  },
+  {
+    "id": "anthropic",
+    "name": "Anthropic",
+    "destination": "C:\\Users\\ofeks\\OneDrive\\Documents\\קבלות",
+    "seller": {
+      "mode": "fixed",
+      "value": "Anthropic"
+    },
+    "product": {
+      "mode": "fixed",
+      "value": "Claude Pro מנוי"
+    },
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "mail.anthropic.com"
+      }
+    ]
+  },
+  {
+    "id": "ace",
+    "name": "ACE",
+    "destination": "C:\\Users\\ofeks\\OneDrive\\Documents\\קבלות",
+    "seller": {
+      "mode": "fixed",
+      "value": "ACE"
+    },
+    "product": {
+      "mode": "fixed",
+      "value": "הזמנה"
+    },
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "ace.co.il"
+      }
+    ]
+  },
+  {
+    "id": "cat-חבר",
+    "name": "חבר",
+    "destination": "C:\\Users\\ofeks\\OneDrive\\Documents\\קבלות",
+    "seller": {
+      "mode": "fixed",
+      "value": "חבר"
+    },
+    "product": {
+      "mode": "extract",
+      "source": "body",
+      "regex": "שם הפריט[^\\n]+\\n([^\\n]+)",
+      "fallback": "הזמנה"
+    },
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "icmega.org",
+        "exclude_subject_contains": "פרסומת",
+        "body_contains": "מספר הזמנה"
+      }
+    ]
+  },
+  {
+    "id": "cat-אבירספורט",
+    "name": "אביר ספורט",
+    "destination": "C:\\Users\\ofeks\\OneDrive\\Documents\\קבלות",
+    "seller": {
+      "mode": "fixed",
+      "value": "אביר ספורט"
+    },
+    "product": {
+      "mode": "fixed",
+      "value": "כדור פיזיו"
+    },
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "abirsport.co.il"
+      }
+    ]
+  },
+  {
+    "id": "upapp",
+    "name": "upapp",
+    "destination": "C:\\Users\\ofeks\\OneDrive\\Documents\\קבלות",
+    "seller": {
+      "mode": "fixed",
+      "value": "upapp"
+    },
+    "product": {
+      "mode": "fixed",
+      "value": "כניסה לחדר כושר אייקון"
+    },
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "hyp.co.il",
+        "subject_contains": "upapp"
+      }
+    ]
+  },
+  {
+    "id": "cat-חברתחשמללישר",
+    "name": "חברת חשמל לישראל",
+    "destination": "C:\\Users\\ofeks\\OneDrive\\Documents\\נכסים\\שלום שבאזי 7\\חשבנות\\חשמל",
+    "seller": {
+      "mode": "fixed",
+      "value": "חברת חשמל לישראל"
+    },
+    "product": {
+      "mode": "fixed",
+      "value": "חשבונית חשמל"
+    },
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "iec.co.il",
+        "subject_contains": "349305852"
+      }
+    ]
+  },
+  {
+    "id": "cat-חברתחשמללישר-2",
+    "name": "חברת חשמל לישראל",
+    "destination": "C:\\Users\\ofeks\\OneDrive\\Documents\\קבלות\\חשבנות\\חשמל",
+    "seller": {
+      "mode": "fixed",
+      "value": "חברת חשמל לישראל"
+    },
+    "product": {
+      "mode": "fixed",
+      "value": "חשבונית חשמל"
+    },
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "iec.co.il"
+      }
+    ]
+  },
+  {
+    "id": "7",
+    "name": "שלום שבאזי 7",
+    "destination": "C:\\Users\\ofeks\\OneDrive\\Documents\\נכסים\\שלום שבאזי 7",
+    "seller": {
+      "mode": "fixed",
+      "value": "שלום שבאזי 7"
+    },
+    "product": {
+      "mode": "fixed",
+      "value": "חשבון"
+    },
+    "exclude": false,
+    "match": [
+      {
+        "subject_contains": "349305852"
+      }
+    ]
+  },
+  {
+    "id": "cat-קבוצתברסרוסי",
+    "name": "קבוצת בר סרוסי",
+    "destination": "C:\\Users\\ofeks\\OneDrive\\Documents\\נכסים",
+    "seller": {
+      "mode": "fixed",
+      "value": "קבוצת בר סרוסי"
+    },
+    "product": {
+      "mode": "fixed",
+      "value": "חשבונית"
+    },
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "morning.co",
+        "subject_contains": "בר סרוסי"
+      }
+    ]
+  },
+  {
+    "id": "cat-אמריקןדיגיטק",
+    "name": "אמריקן דיגיטקס",
+    "destination": "C:\\Users\\ofeks\\OneDrive\\Documents\\קבלות",
+    "seller": {
+      "mode": "fixed",
+      "value": "אמריקן דיגיטקס"
+    },
+    "product": {
+      "mode": "fixed",
+      "value": "חשבונית"
+    },
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "morning.co",
+        "subject_contains": "אמריקן דיגיטקס"
+      }
+    ]
+  },
+  {
+    "id": "planet-cinema",
+    "name": "Planet Cinema",
+    "destination": "C:\\Users\\ofeks\\OneDrive\\Documents\\קבלות",
+    "seller": {
+      "mode": "fixed",
+      "value": "Planet Cinema"
+    },
+    "product": {
+      "mode": "fixed",
+      "value": "כרטיסים"
+    },
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "planetcinema.co.il"
+      }
+    ]
+  },
+  {
+    "id": "cat-גןילדיםדיסני",
+    "name": "גן ילדים דיסני ראשון",
+    "destination": "C:\\Users\\ofeks\\OneDrive\\Documents\\קבלות",
+    "seller": {
+      "mode": "fixed",
+      "value": "גן ילדים דיסני ראשון"
+    },
+    "product": {
+      "mode": "fixed",
+      "value": "שכר לימוד"
+    },
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "smartbee.co.il"
+      }
+    ]
+  },
+  {
+    "id": "cat-צהל",
+    "name": "צה״ל",
+    "destination": "C:\\Users\\ofeks\\OneDrive\\Ofek\\Documents\\צבא\\מילואים",
+    "seller": {
+      "mode": "fixed",
+      "value": "צה״ל"
+    },
+    "product": {
+      "mode": "fixed",
+      "value": "אישור מילואים"
+    },
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "miluim.idf.il"
+      }
+    ]
+  },
+  {
+    "id": "cat-משכורת",
+    "name": "משכורת",
+    "destination": "C:\\Users\\ofeks\\OneDrive\\Ofek\\Work\\Sternum\\משכורות",
+    "seller": {
+      "mode": "fixed",
+      "value": "משכורת"
+    },
+    "product": {
+      "mode": "extract",
+      "source": "body",
+      "regex": "(תלוש שכר לחודש \\S+ \\d{4})",
+      "fallback": "תלוש שכר"
+    },
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "billing@sternum-sec.com",
+        "body_contains": "תלוש שכר"
+      }
+    ]
+  },
+  {
+    "id": "sternum-sec-com",
+    "name": "sternum-sec.com",
+    "destination": null,
+    "seller": null,
+    "product": null,
+    "exclude": true,
+    "match": [
+      {
+        "sender_contains": "sternum-sec.com"
+      }
+    ]
+  },
+  {
+    "id": "sonol-evi",
+    "name": "Sonol evi",
+    "destination": "C:\\Users\\ofeks\\OneDrive\\Documents\\קבלות",
+    "seller": {
+      "mode": "fixed",
+      "value": "Sonol evi"
+    },
+    "product": {
+      "mode": "fixed",
+      "value": "חשבונית"
+    },
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "sonolevi.co.il",
+        "subject_contains": "טעינת רכב"
+      }
+    ]
+  },
+  {
+    "id": "cat-סופרפארם",
+    "name": "סופר פארם",
+    "destination": "C:\\Users\\ofeks\\OneDrive\\Documents\\קבלות",
+    "seller": {
+      "mode": "fixed",
+      "value": "סופר פארם"
+    },
+    "product": {
+      "mode": "fixed",
+      "value": "חשבונית"
+    },
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "super-pharm.co.il"
+      }
+    ]
+  },
+  {
+    "id": "cat-מחסניחשמל",
+    "name": "מחסני חשמל",
+    "destination": "C:\\Users\\ofeks\\OneDrive\\Documents\\קבלות",
+    "seller": {
+      "mode": "fixed",
+      "value": "מחסני חשמל"
+    },
+    "product": {
+      "mode": "fixed",
+      "value": "הזמנה"
+    },
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "payngo.co.il",
+        "body_contains": "מחסני חשמל"
+      }
+    ]
+  }
+]

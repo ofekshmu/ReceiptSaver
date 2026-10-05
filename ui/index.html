@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Receipt Saver</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <header class="titlebar">
+    <div class="brand">Receipt&nbsp;Saver<span id="app-version" class="version" title="App version"></span></div>
+    <nav class="tabs">
+      <button data-view="run" class="tab active">This run</button>
+      <button data-view="history" class="tab">History</button>
+      <button data-view="fallbacks" class="tab">Fallbacks <span id="fb-badge" class="badge" hidden>0</span></button>
+      <button data-view="receipts" class="tab">Receipts</button>
+      <button data-view="categories" class="tab">Categories</button>
+    </nav>
+    <div class="win-controls">
+      <button id="btn-rescan" title="Run scan now">&#10227;</button>
+      <button id="btn-min" title="Minimize">&#8211;</button>
+      <button id="btn-close" title="Close to tray">&times;</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="view-run" class="view active">
+      <div id="run-prompt" class="run-prompt" hidden>
+        <p>No scan has run yet this session.</p>
+        <button id="run-start">Run scan</button>
+      </div>
+      <div id="run-summary" class="summary"></div>
+      <div id="run-accounts"></div>
+      <div id="run-list" class="cards"></div>
+      <div id="run-empty" class="empty" hidden>Nothing new this run.</div>
+    </section>
+
+    <section id="view-history" class="view">
+      <div class="filters">
+        <input id="hist-search" type="search" placeholder="Search sender, subject, seller&hellip;" dir="auto">
+      </div>
+      <div id="hist-list" class="cards"></div>
+      <div id="hist-sentinel"></div>
+    </section>
+
+    <section id="view-fallbacks" class="view">
+      <div class="fb-toolbar">
+        <button id="fb-viewtoggle">Simple view</button>
+        <button id="fb-handoff" disabled title="Handle selected with Claude">
+          <svg class="claude-mark" viewBox="0 0 24 24" aria-hidden="true" width="14" height="14">
+            <path fill="currentColor" d="M12 1.5l1.9 5.1 5.1 1.9-5.1 1.9L12 15.5l-1.9-5.1L5 8.5l5.1-1.9z
+              M18.5 14l1 2.6 2.6 1-2.6 1-1 2.6-1-2.6-2.6-1 2.6-1z
+              M5 15l.8 2 2 .8-2 .8L5 21.5l-.8-2-2-.8 2-.8z"/>
+          </svg>
+          <span aria-hidden="true">&rarr;</span>
+        </button>
+      </div>
+      <div id="fb-list" class="cards"></div>
+      <div id="fb-empty" class="empty" hidden>No unresolved fallbacks. &#127881;</div>
+    </section>
+
+    <section id="view-receipts" class="view">
+      <div class="rx-nav"></div>
+      <div class="rx-main">
+        <input id="rx-search" type="search" placeholder="Search all receipts…" dir="auto">
+        <div class="rx-crumbs">
+          <button id="rx-back" title="Back (Alt+←)" disabled>‹</button>
+          <div class="rx-crumb-trail"></div>
+          <div class="rx-sort" title="Sort this folder">
+            <button id="rx-sort-field">Date</button>
+            <button id="rx-sort-dir" title="Descending">↓</button>
+          </div>
+          <button id="rx-open" title="Open this folder in Windows Explorer">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
+                 stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/>
+            </svg>
+          </button>
+        </div>
+        <div class="rx-list"></div>
+        <div class="rx-empty" hidden></div>
+      </div>
+    </section>
+
+    <section id="view-categories" class="view">
+      <div class="cat-bar">
+        <input id="cat-new-name" type="text" dir="auto" placeholder="New category name…">
+        <button id="cat-new-btn" type="button">Add category</button>
+      </div>
+      <div id="cat-list"></div>
+      <div id="cat-empty" class="rx-empty" hidden>No categories yet.</div>
+    </section>
+  </main>
+
+  <template id="tpl-cat">
+    <article class="cat" data-id="">
+      <div class="cat-row">
+        <button class="cat-expand" title="Edit this category">▸</button>
+        <input class="cat-name" dir="auto" title="Category name">
+        <span class="cat-summary" dir="ltr"></span>
+        <span class="cat-count" title="match rules"></span>
+        <select class="cat-merge" title="Merge this category into another"></select>
+        <button class="cat-save" title="Save changes">Save</button>
+        <button class="cat-del" title="Delete category">✕</button>
+      </div>
+      <div class="cat-editor" hidden>
+        <div class="cat-fields">
+          <div class="field fd-dest">
+            <label>Destination</label>
+            <div class="combo f-dest" data-value="">
+              <input class="combo-input" type="text" dir="auto" autocomplete="off" spellcheck="false"
+                     placeholder="Pick a folder or type to search&hellip;">
+              <ul class="combo-list" hidden></ul>
+            </div>
+          </div>
+          <div class="field fd-seller"><label>Seller</label><div class="nf-slot"></div></div>
+          <div class="field fd-product"><label>Product</label><div class="nf-slot"></div></div>
+        </div>
+        <div class="field">
+          <label>Match rules <span class="hint">(a mail matches if any rule matches; a rule needs all its conditions)</span></label>
+          <div class="cat-matches"></div>
+          <div class="match-grid cat-add-match">
+            <input class="f-sender" dir="auto" placeholder="sender contains">
+            <input class="f-subject" dir="auto" placeholder="subject contains">
+            <input class="f-subject-not" dir="auto" placeholder="subject does NOT contain">
+            <input class="f-body" dir="auto" placeholder="body contains">
+            <button type="button" class="cat-add-match-btn">Add rule</button>
+          </div>
+        </div>
+      </div>
+    </article>
+  </template>
+
+  <!-- Seller / Product field: a value, "use for every mail", or an extraction rule -->
+  <template id="tpl-namefield">
+    <div class="nf">
+      <div class="nf-row">
+        <input class="nf-value" dir="auto">
+        <label class="nf-every" title="Ticked: every future mail filed by this category gets this name. Unticked: only this mail — future mails get the app's suggestion.">
+          <input type="checkbox" class="nf-every-cb" checked> Use for every mail
+        </label>
+        <button type="button" class="nf-x-toggle"
+                title="Pull this name out of each email with a rule (regex) instead of a fixed value">&#9881; Extract</button>
+      </div>
+      <div class="nf-extract" hidden>
+        <select class="nf-source" title="Which part of the email the rule reads">
+          <option value="subject">Subject</option>
+          <option value="body">Body</option>
+          <option value="sender_name">Sender name</option>
+        </select>
+        <input class="nf-regex" dir="ltr" spellcheck="false" autocomplete="off"
+               placeholder="regex, e.g. Invoice (\S+)"
+               title="Python regular expression. The first ( ) group is used, or the whole match if there is no group.">
+        <span class="nf-preview" dir="auto"></span>
+      </div>
+    </div>
+  </template>
+
+  <div id="toast-host"></div>
+  <div id="win-resize-grip" title="Drag to resize"></div>
+
+  <!-- Right-click menu for Receipts explorer rows (see rxContextMenu in app.js) -->
+  <div id="rx-ctx-menu" role="menu" hidden>
+    <button type="button" class="rx-ctx-item" data-act="ask-claude" role="menuitem">
+      <svg viewBox="0 0 24 24" aria-hidden="true" width="13" height="13">
+        <path fill="currentColor" d="M12 1.5l1.9 5.1 5.1 1.9-5.1 1.9L12 15.5l-1.9-5.1L5 8.5l5.1-1.9z
+        M18.5 14l1 2.6 2.6 1-2.6 1-1 2.6-1-2.6-2.6-1 2.6-1z
+        M5 15l.8 2 2 .8-2 .8L5 21.5l-.8-2-2-.8 2-.8z"/>
+      </svg>
+      <span>Ask Claude</span>
+    </button>
+  </div>
+
+  <template id="tpl-card">
+    <article class="card">
+      <span class="pill"></span>
+      <div class="card-main">
+        <div class="card-title" dir="auto"></div>
+        <div class="card-sub" dir="auto"></div>
+      </div>
+      <div class="card-meta">
+        <span class="chip account"></span>
+        <span class="date"></span>
+        <a class="open-folder" href="#" title="Open folder">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+               stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/>
+          </svg>
+        </a>
+      </div>
+    </article>
+  </template>
+
+  <template id="tpl-fallback">
+    <article class="card fb">
+      <input type="checkbox" class="fb-check"
+             title="Tick to include this email when you press &quot;Handle selected with Claude&quot;">
+      <div class="card-main">
+        <div class="card-title" dir="auto"></div>
+        <div class="card-sub" dir="auto"></div>
+        <div class="fb-links">
+          <a class="open-folder" href="#" title="Open folder">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+                 stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/>
+            </svg>
+          </a>
+          <a class="open-pdf" href="#">Open email.pdf</a>
+          <span class="conf"></span>
+        </div>
+        <form class="fb-form">
+          <fieldset class="fb-kinds">
+            <legend>What to do with this email</legend>
+            <label class="opt">
+              <span class="opt-head"><input type="radio" name="kind" value="category" checked> File under a category</span>
+              <span class="opt-desc">File this email now <b>and</b> remember it: pick an existing category or create a new one, so future emails like it file automatically.</span>
+              <span class="opt-body">
+                <div class="combo f-cat-assign" data-value="">
+                  <input class="combo-input" type="text" dir="auto" autocomplete="off"
+                         spellcheck="false" placeholder="Choose a category or type to search&hellip;"
+                         title="Which category this email belongs to">
+                  <ul class="combo-list" hidden></ul>
+                </div>
+                <input class="f-cat-name" type="text" dir="auto" hidden
+                       placeholder="New category name (e.g. חשמל)">
+              </span>
+            </label>
+            <label class="opt">
+              <span class="opt-head"><input type="radio" name="kind" value="exclude"> Exclude as promotional</span>
+              <span class="opt-desc">This is not a receipt (newsletter / ad). Deletes the saved folder and auto-skips future emails matching the rule below.</span>
+            </label>
+            <label class="opt">
+              <span class="opt-head"><input type="radio" name="kind" value="once"> Move this one only</span>
+              <span class="opt-desc">File just this one email using the settings below. Nothing is remembered &mdash; a similar email later will land in fallbacks again.</span>
+            </label>
+            <label class="opt">
+              <span class="opt-head"><input type="radio" name="kind" value="skip"> Skip</span>
+              <span class="opt-desc">Remove it from this list without filing anything. The folder stays in <span dir="rtl">_לטיפול ידני</span>.</span>
+            </label>
+          </fieldset>
+
+          <div class="fb-fields">
+            <div class="fb-fields-head" hidden></div>
+            <div class="field fd-dest">
+              <label>Destination</label>
+              <div class="combo f-dest" data-value="">
+                <input class="combo-input" type="text" dir="auto" autocomplete="off" spellcheck="false"
+                       placeholder="Pick a folder or type to search&hellip;"
+                       title="The folder this receipt is filed into. Most-used folders first; Browse… opens the Windows folder picker (it can also create a new folder).">
+                <ul class="combo-list" hidden></ul>
+              </div>
+              <span class="hint">The folder the receipt is filed into.</span>
+            </div>
+            <div class="field fd-seller">
+              <label>Seller</label>
+              <div class="nf-slot"></div>
+              <span class="hint">Business name shown in the folder name.</span>
+            </div>
+            <div class="field fd-product">
+              <label>Product</label>
+              <div class="nf-slot"></div>
+              <span class="hint">What the receipt is for.</span>
+            </div>
+            <div class="field fd-match">
+              <label>Match rule</label>
+              <div class="fb-match-existing" hidden></div>
+              <div class="match-grid">
+                <input class="f-sender" dir="auto" placeholder="sender contains"
+                       title="Text in the sender address — usually the domain, e.g. electra-power.co.il">
+                <input class="f-subject" dir="auto" placeholder="subject contains (optional)"
+                       title="Also require this text in the subject — useful for shared payment platforms">
+                <input class="f-subject-not" dir="auto" placeholder="subject does NOT contain (optional)">
+                <input class="f-body" dir="auto" placeholder="body contains (optional)">
+              </div>
+              <span class="hint">Future emails matching all of these conditions follow this choice.</span>
+            </div>
+          </div>
+          <button type="submit" class="fb-apply">Apply</button>
+        </form>
+      </div>
+    </article>
+  </template>
+
+  <template id="tpl-fb-compact">
+    <article class="card fb-compact">
+      <input type="checkbox" class="fb-check" title="Select for &quot;Handle selected with Claude&quot;">
+      <div class="card-main">
+        <div class="card-title" dir="auto"></div>
+        <div class="card-sub" dir="auto"></div>
+      </div>
+      <span class="conf"></span>
+      <a class="open-folder" href="#" title="Open folder">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+             stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/>
+        </svg>
+      </a>
+      <button class="fb-expand" title="Show options">&#9656;</button>
+      <div class="fb-form-slot" hidden></div>
+    </article>
+  </template>
+
+  <template id="tpl-rx-root">
+    <div class="rx-root-wrap">
+      <button class="rx-root"><span class="rx-root-label" dir="auto"></span></button>
+      <button class="rx-root-toggle" tabindex="-1"></button>
+    </div>
+  </template>
+
+  <template id="tpl-rx-row">
+    <div class="rx-row" tabindex="0">
+      <span class="rx-glyph"></span>
+      <span class="rx-name" dir="auto"></span>
+      <span class="rx-meta"></span>
+    </div>
+  </template>
+
+  <script src="app.js"></script>
+</body>
+</html>
