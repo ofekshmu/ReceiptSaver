@@ -179,13 +179,45 @@ main { flex: 1; overflow: hidden; position: relative; }
 }
 .field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .field[hidden] { display: none; }
-.fb-fields select.f-basedir { max-width: 100%; }
 .field > label { color: var(--text); font-size: 12px; font-weight: 500; }
 .field .hint { color: var(--muted); font-size: 11px; line-height: 1.35; }
-.fb-fields input, .fb-fields select {
+.fb-fields input, .fb-fields select, .cat-editor input, .cat-editor select {
   padding: 6px 8px; border-radius: 6px; border: 1px solid var(--line);
-  background: var(--panel-2); color: var(--text);
+  background: var(--panel-2); color: var(--text); font-size: 12px; min-width: 0;
 }
+.cat-editor input, .cat-editor select { background: var(--bg); }
+.fd-dest, .fd-match { grid-column: 1 / -1; }
+.field .combo { display: block; min-width: 0; }
+.combo.is-disabled .combo-input { opacity: .55; cursor: not-allowed; }
+
+/* seller / product widget: value + "use for every mail" + ⚙ Extract */
+.nf { display: flex; flex-direction: column; gap: 5px; }
+.nf-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.nf-value { flex: 1 1 140px; }
+.nf-every { display: inline-flex; align-items: center; gap: 4px; color: var(--muted);
+  font-size: 11px; white-space: nowrap; cursor: pointer; }
+.nf-every[hidden] { display: none; }
+.nf-x-toggle {
+  background: transparent; color: var(--muted); border: 1px solid var(--line);
+  border-radius: 6px; padding: 4px 8px; font-size: 11px; cursor: pointer; white-space: nowrap;
+}
+.nf-x-toggle:hover { color: var(--text); border-color: var(--accent); }
+.nf-x-toggle.on { color: var(--accent); border-color: var(--accent); }
+.nf-x-toggle[hidden] { display: none; }
+.nf-extract { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.nf-extract[hidden] { display: none; }
+.nf-regex { flex: 1 1 160px; font-family: Consolas, "Cascadia Mono", monospace; }
+.nf-preview { flex-basis: 100%; font-size: 11px; color: var(--muted); }
+.nf-preview[hidden] { display: none; }
+.nf-preview.good { color: var(--ok); }
+.nf-preview.warn { color: var(--warn); }
+.nf-preview.bad { color: var(--bad); }
+
+/* match rule conditions */
+.match-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.match-grid button { grid-column: 1 / -1; justify-self: start; }
+.fb-match-existing { display: flex; flex-direction: column; gap: 3px; margin-bottom: 4px; }
+.fb-match-existing[hidden] { display: none; }
 .fb-links { display: flex; align-items: center; gap: 12px; font-size: 12px; margin-top: 4px; }
 .conf.low { color: var(--warn); }
 .conf.medium { color: var(--muted); }
@@ -360,21 +392,32 @@ main { flex: 1; overflow: hidden; position: relative; }
 #cat-list { display: flex; flex-direction: column; gap: 6px; }
 .cat {
   background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px;
-  padding: 8px; overflow-x: auto;
+  padding: 8px;
 }
 .cat.is-exclude { border-left: 3px solid var(--warn); }
-.cat-row { display: flex; align-items: center; gap: 6px; min-width: max-content; }
+.cat-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .cat-row input, .cat-row select {
   padding: 5px 7px; border-radius: 5px; border: 1px solid var(--line);
   background: var(--bg); color: var(--text); font-size: 12px;
 }
-.cat-name { font-weight: 600; min-width: 120px; }
-.cat-seller, .cat-product { min-width: 110px; }
-.cat-subfolder { min-width: 140px; }
+.cat-name { font-weight: 600; width: 160px; flex: none; }
+.cat-summary {
+  flex: 1 1 auto; min-width: 0; color: var(--muted); font-size: 12px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cat-editor { margin: 10px 0 2px 26px; display: flex; flex-direction: column; gap: 10px; }
+.cat-editor[hidden] { display: none; }
+.cat-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; }
+.cat-fields[hidden] { display: none; }
+.cat-editor .match-grid button {
+  background: var(--panel); color: var(--muted); border: 1px solid var(--line);
+  border-radius: 6px; padding: 5px 10px; font-size: 12px; cursor: pointer;
+}
+.cat-editor .match-grid button:hover { color: var(--text); border-color: var(--accent); }
 .cat-count { color: var(--muted); font-size: 11px; white-space: nowrap; }
 .cat-expand { padding: 4px 7px !important; }
 .cat-del { color: var(--bad) !important; }
-.cat-matches { margin: 6px 0 2px 26px; display: flex; flex-direction: column; gap: 3px; }
+.cat-matches { display: flex; flex-direction: column; gap: 3px; margin-bottom: 4px; }
 .cat-match {
   display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted);
 }

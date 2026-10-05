@@ -1,16 +1,20 @@
 import unittest
+from pathlib import Path
 
 import categories as C
+
+R = r"C:\Users\ofeks\OneDrive\Documents\קבלות"
+FIXED = lambda v: {"mode": "fixed", "value": v}
 
 
 def base():
     return [
-        {"id": "elec", "name": "חשמל", "seller": "חח\"י", "product": "חשבונית חשמל",
-         "base_dir": None, "subfolder": "חשבנות/חשמל",
-         "match": [{"sender_contains": "iec.co.il"}]},
-        {"id": "gas", "name": "גז", "seller": "פזגז", "product": "חשבונית גז",
-         "base_dir": None, "subfolder": "חשבנות/גז",
-         "match": [{"sender_contains": "pazgas.co.il"}]},
+        {"id": "elec", "name": "חשמל", "seller": FIXED("חח\"י"),
+         "product": FIXED("חשבונית חשמל"), "destination": R + r"\חשבנות\חשמל",
+         "exclude": False, "match": [{"sender_contains": "iec.co.il"}]},
+        {"id": "gas", "name": "גז", "seller": FIXED("פזגז"),
+         "product": FIXED("חשבונית גז"), "destination": R + r"\חשבנות\גז",
+         "exclude": False, "match": [{"sender_contains": "pazgas.co.il"}]},
     ]
 
 
@@ -19,37 +23,35 @@ class TestFindNew(unittest.TestCase):
         self.assertEqual(C.find(base(), "gas")["name"], "גז")
         self.assertIsNone(C.find(base(), "nope"))
 
-    def test_new_category_slug_unique(self):
+    def test_new_category_shape_and_unique_slug(self):
         cats = base()
-        c = C.new_category("חשמל", seller="x", categories=cats)   # name clashes with elec
+        c = C.new_category("חשמל", destination=R, seller=FIXED("x"), categories=cats)
         self.assertNotIn(c["id"], {x["id"] for x in cats})
         self.assertEqual(c["match"], [])
         self.assertFalse(c["exclude"])
+        self.assertEqual(c["destination"], R)
+        self.assertEqual(c["seller"], FIXED("x"))
+        self.assertIsNone(c["product"])
+
+    def test_new_category_validates_specs(self):
+        with self.assertRaises(ValueError):
+            C.new_category("x", product={"mode": "extract", "source": "body", "regex": "("})
 
 
 class TestAddRemoveMatch(unittest.TestCase):
-    def test_add_match_prunes_and_dedups(self):
+    def test_add_match_keeps_only_conditions_and_dedups(self):
         cats = base()
         self.assertTrue(C.add_match(cats, "elec", {
             "sender_contains": "electra-power.co.il", "subject_contains": "",
-            "seller": "חח\"י"}))                       # seller == default -> dropped
-        entry = C.find(cats, "elec")["match"][-1]
-        self.assertEqual(entry, {"sender_contains": "electra-power.co.il"})
-        # dedup
+            "seller": "ignored", "body_contains": None}))
+        self.assertEqual(C.find(cats, "elec")["match"][-1],
+                         {"sender_contains": "electra-power.co.il"})
         C.add_match(cats, "elec", {"sender_contains": "electra-power.co.il"})
         self.assertEqual(len(C.find(cats, "elec")["match"]), 2)
 
-    def test_add_match_keeps_real_override(self):
-        cats = base()
-        C.add_match(cats, "gas", {"sender_contains": "shared.com",
-                                  "subject_contains": "פזגז", "seller": "פזגז ביתי"})
-        self.assertEqual(C.find(cats, "gas")["match"][-1],
-                         {"sender_contains": "shared.com", "subject_contains": "פזגז",
-                          "seller": "פזגז ביתי"})
-
     def test_add_match_rejects_empty_conditions(self):
         cats = base()
-        self.assertFalse(C.add_match(cats, "gas", {"seller": "x"}))
+        self.assertFalse(C.add_match(cats, "gas", {"body_contains": "x"}))
 
     def test_remove_match(self):
         cats = base()
@@ -61,12 +63,19 @@ class TestAddRemoveMatch(unittest.TestCase):
 class TestUpdateDelete(unittest.TestCase):
     def test_update_category(self):
         cats = base()
-        self.assertTrue(C.update_category(cats, "gas",
-                        {"name": "גז ביתי", "subfolder": "חשבנות/גז-בית", "seller": ""}))
+        self.assertTrue(C.update_category(cats, "gas", {
+            "name": "גז ביתי", "destination": R + r"\גז-בית", "seller": None,
+            "product": {"mode": "extract", "source": "subject", "regex": r"(\d+)"}}))
         g = C.find(cats, "gas")
         self.assertEqual(g["name"], "גז ביתי")
-        self.assertEqual(g["subfolder"], "חשבנות/גז-בית")
+        self.assertEqual(g["destination"], R + r"\גז-בית")
         self.assertIsNone(g["seller"])
+        self.assertEqual(g["product"]["mode"], "extract")
+
+    def test_update_rejects_bad_regex(self):
+        with self.assertRaises(ValueError):
+            C.update_category(base(), "gas", {
+                "product": {"mode": "extract", "source": "subject", "regex": "("}})
 
     def test_delete_category(self):
         cats = base()
@@ -76,25 +85,22 @@ class TestUpdateDelete(unittest.TestCase):
 
 
 class TestMerge(unittest.TestCase):
-    def test_merge_bakes_differing_defaults_onto_moved_entries(self):
+    def test_merge_moves_entries_and_drops_source(self):
         cats = base()
-        C.merge_categories(cats, "gas", "elec")
+        self.assertTrue(C.merge_categories(cats, "gas", "elec"))
         self.assertIsNone(C.find(cats, "gas"))
-        moved = C.find(cats, "elec")["match"][-1]
-        self.assertEqual(moved["sender_contains"], "pazgas.co.il")
-        self.assertEqual(moved["seller"], "פזגז")           # baked, differs from חח"י
-        self.assertEqual(moved["product"], "חשבונית גז")
+        self.assertEqual(C.find(cats, "elec")["match"][-1], {"sender_contains": "pazgas.co.il"})
 
     def test_merge_same_id_or_missing_is_false(self):
         cats = base()
         self.assertFalse(C.merge_categories(cats, "gas", "gas"))
         self.assertFalse(C.merge_categories(cats, "gas", "ghost"))
 
-    def test_match_category_after_merge_routes_gas_to_elec_route(self):
+    def test_after_merge_target_naming_and_destination_apply(self):
         cats = base()
         C.merge_categories(cats, "gas", "elec")
-        seller, product, sub, _ = C.match_category("x@pazgas.co.il", categories=cats)
-        self.assertEqual((seller, product, sub), ("פזגז", "חשבונית גז", "חשבנות/חשמל"))
+        self.assertEqual(C.match_category("x@pazgas.co.il", categories=cats),
+                         ("חח\"י", "חשבונית חשמל", Path(R + r"\חשבנות\חשמל")))
 
 
 class TestExcludeCategory(unittest.TestCase):
@@ -105,6 +111,7 @@ class TestExcludeCategory(unittest.TestCase):
         self.assertIs(a, b)
         self.assertEqual(sum(1 for c in cats if c["id"] == C.EXCLUDE_CATEGORY_ID), 1)
         self.assertTrue(a["exclude"])
+        self.assertIsNone(a["destination"])
 
 
 if __name__ == "__main__":

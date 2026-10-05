@@ -3,7 +3,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from receipt_saver import parse_date, match_custom, unique_folder
+from receipt_saver import parse_date, unique_folder
+from categories import match_category
 import receipt_saver
 import history as history_mod
 
@@ -22,31 +23,31 @@ class TestParseDate(unittest.TestCase):
 
 class TestSternumPayslipRule(unittest.TestCase):
     def test_extracts_month_and_year_from_body(self):
-        result = match_custom(
+        result = match_category(
             "billing@sternum-sec.com",
             "some subject line",
             'היי אופק,\n\nמצ"ב תלוש שכר לחודש יוני 2026.\n\nבברכה,',
         )
-        seller, product, category, base_dir = result
+        seller, product, dest = result
         self.assertEqual(seller, "משכורת")
         self.assertEqual(product, "תלוש שכר לחודש יוני 2026")
-        self.assertEqual(base_dir, Path(r"C:\Users\ofeks\OneDrive\Ofek\Work\Sternum\משכורות"))
+        self.assertEqual(dest, Path(r"C:\Users\ofeks\OneDrive\Ofek\Work\Sternum\משכורות"))
 
     def test_falls_back_to_static_product_if_regex_does_not_match(self):
-        result = match_custom(
+        result = match_category(
             "billing@sternum-sec.com",
             "some subject line",
             "תלוש שכר בפורמט שונה לגמרי",
         )
-        seller, product, category, base_dir = result
+        seller, product, dest = result
         self.assertEqual(product, "תלוש שכר")
 
     def test_extracts_month_and_year_despite_nbsp_and_line_wrap(self):
         # Outlook's HTML-to-text body conversion can leave non-breaking
         # spaces (U+00A0) and mid-sentence newlines in place of normal spaces.
         body = 'היי אופק,\n\nמצ"ב תלוש\xa0שכר\nלחודש\xa0יוני 2026.\n\nבברכה,'
-        result = match_custom("billing@sternum-sec.com", "some subject line", body)
-        seller, product, category, base_dir = result
+        result = match_category("billing@sternum-sec.com", "some subject line", body)
+        seller, product, dest = result
         self.assertEqual(product, "תלוש שכר לחודש יוני 2026")
 
 
@@ -55,52 +56,63 @@ class TestUpappRule(unittest.TestCase):
     # rule must not match on sender domain alone — a real incident tagged an
     # unrelated Ichilov WELL payment as the Icon gym.
     def test_matches_genuine_upapp_receipt(self):
-        result = match_custom("noreply@hyp.co.il", "חשבונית מס / קבלה עבור תשלום ל-upapp")
+        result = match_category("noreply@hyp.co.il", "חשבונית מס / קבלה עבור תשלום ל-upapp")
         self.assertIsNotNone(result)
-        seller, product, category, base_dir = result
+        seller, product, dest = result
         self.assertEqual(seller, "upapp")
         self.assertEqual(product, "כניסה לחדר כושר אייקון")
 
     def test_does_not_match_unrelated_hyp_sender(self):
-        result = match_custom("noreply@hyp.co.il", "אישור תשלום - איכילוב WELL")
+        result = match_category("noreply@hyp.co.il", "אישור תשלום - איכילוב WELL")
         self.assertIsNone(result)
 
 
-class TestRulesSourcedFromCategories(unittest.TestCase):
-    """load_custom_rules() prefers categories.json; match_custom() routes through it."""
+class TestCategoryRouting(unittest.TestCase):
+    """process_message files a category match into its destination."""
 
     def setUp(self):
         import json, categories
         self.tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
-        self.cats_file = self.tmp / "categories.json"
-        self.cats_file.write_text(json.dumps([
-            {"id": "elec", "name": "חשמל", "seller": "חח\"י", "product": "חשבונית חשמל",
-             "base_dir": None, "subfolder": "חשבנות/חשמל",
-             "match": [{"sender_contains": "iectest.co.il"}]},
-            {"id": "promoblock", "name": "promo", "exclude": True,
-             "match": [{"sender_contains": "spam.example",
-                        "subject_contains": "מבצע"}]},
+        self.dest = self.tmp / "bills" / "חשמל"
+        cats_file = self.tmp / "categories.json"
+        cats_file.write_text(json.dumps([
+            {"id": "elec", "name": "חשמל", "destination": str(self.dest),
+             "seller": {"mode": "fixed", "value": "חברת חשמל"},
+             "product": {"mode": "extract", "source": "subject", "regex": r"חשבון (\d+)"},
+             "exclude": False, "match": [{"sender_contains": "iectest.co.il"}]},
+            {"id": "excluded", "name": "(excluded)", "exclude": True, "destination": None,
+             "seller": None, "product": None,
+             "match": [{"sender_contains": "spam.example", "subject_contains": "מבצע"}]},
         ], ensure_ascii=False), encoding="utf-8")
-        self._orig = receipt_saver.CATEGORIES_FILE
-        receipt_saver.CATEGORIES_FILE = self.cats_file
-        categories.CATEGORIES_FILE = self.cats_file
-        self.addCleanup(setattr, receipt_saver, "CATEGORIES_FILE", self._orig)
-        self.addCleanup(setattr, categories, "CATEGORIES_FILE", categories.SCRIPT_DIR / "categories.json")
+        orig = categories.CATEGORIES_FILE
+        categories.CATEGORIES_FILE = cats_file
+        self.addCleanup(setattr, categories, "CATEGORIES_FILE", orig)
+        for name in ("save_email_pdf", "create_ticktick_task"):
+            self.addCleanup(setattr, receipt_saver, name, getattr(receipt_saver, name))
+            setattr(receipt_saver, name, lambda *a, **k: None)
+        self.addCleanup(setattr, history_mod, "HISTORY_FILE", history_mod.HISTORY_FILE)
+        history_mod.HISTORY_FILE = self.tmp / "history.json"
 
-    def test_load_custom_rules_flattens_categories(self):
-        rules = receipt_saver.load_custom_rules()
-        self.assertEqual(rules[0]["match_sender_contains"], "iectest.co.il")
-        self.assertEqual(rules[0]["seller"], "חח\"י")
-        self.assertEqual(rules[0]["category"], "חשבנות/חשמל")
+    def _msg(self, sender, subject):
+        return {"id": "m1", "sender": sender, "subject": subject,
+                "date_raw": "Thu, 9 Jul 2026 14:47:00 +0300", "is_sent": False,
+                "body_text": "", "body_html": "<p>x</p>", "first_attachment_name": "",
+                "attachments": lambda: [], "link": ""}
 
-    def test_match_custom_routes_via_categories(self):
-        seller, product, sub, base = match_custom("bill@iectest.co.il", "any")
-        self.assertEqual((seller, product, sub, base), ("חח\"י", "חשבונית חשמל", "חשבנות/חשמל", None))
+    def test_saved_into_destination_with_resolved_names(self):
+        res = receipt_saver.process_message(self._msg("bill@iectest.co.il", "חשבון 8812"),
+                                            {"label": "ofek", "email": "o@x"})
+        self.assertEqual(res["status"], "saved")
+        rec = res["record"]
+        self.assertEqual((rec["seller"], rec["product"]), ("חברת חשמל", "8812"))
+        self.assertEqual(Path(rec["folder_path"]).parent, self.dest)
+        self.assertEqual(rec["rule_source"], "custom")
 
-    def test_match_custom_exclude_via_categories(self):
-        self.assertEqual(match_custom("x@spam.example", "מבצע ענק")[0], "__exclude__")
-        self.assertIsNone(match_custom("x@spam.example", "חשבונית"))
+    def test_exclude(self):
+        res = receipt_saver.process_message(self._msg("x@spam.example", "מבצע ענק"),
+                                            {"label": "ofek", "email": "o@x"})
+        self.assertEqual(res["status"], "excluded")
 
 
 class TestUniqueFolder(unittest.TestCase):

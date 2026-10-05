@@ -77,9 +77,10 @@ YYYY_MM_DD - Seller Name - Product Description - [account]
 | `version.py` | Single source of the app version string shown next to the wordmark. Bump `__version__`; `full_version()` appends the short git commit |
 | `install_startup.py` | Registers/removes the `ReceiptSaverUI` logon task (`--uninstall`). The task action is `pythonw app.py --autostart` — that flag is what tells `app.py` to scan immediately instead of opening idle. Uses PowerShell `Register-ScheduledTask` (no admin needed) and clears any leftover Startup-folder launcher |
 | `history.py` | Append-only `history.json` store — one record per handled mail, backs the History view. `append` (dedup by `id`), `update` (patch matching rows only), `upsert` (patch if present, else append — used for fallback resolutions) |
-| `fallback_ops.py` | Heuristic `suggest()` for unresolved fallbacks + `apply_decision()` (rule / once / exclude / skip): writes `custom_rules.json`, moves the folder out of `_לטיפול ידני`, marks `fallback_log.json` resolved, and upserts a `RESOLVED` history row (created from the fallback entry if no scan-time row exists) |
-| `receipt_roots.py` | Discovers every destination root (main `קבלות`, the fallback dir, Japanologia, and each `base_dir` in the rules — `categories.json`, or `custom_rules.json` pre-migration) and guards `Api.browse` against filesystem access outside them. Backs the Receipts tab |
-| `categories.py` | A *category* both matches incoming mail and defines where matched receipts file (route + subfolder + seller/product defaults). `categories.json` is a list; each has an OR-list `match[]` of `{sender_contains, subject_contains, exclude_subject_contains, body_contains, product_body_regex}` entries. `match_category()` is a drop-in for `receipt_saver.match_custom()` — same `(seller, product, subfolder, base_dir)` tuple / `"__exclude__"` sentinel / `None`. `to_legacy_rules()` flattens categories to the old rule-dict shape so `receipt_saver.load_custom_rules()` and the providers' query builders keep working unchanged. Replaces the flat per-sender `custom_rules.json` (migrated by `migrate_rules_to_categories.py`; `custom_rules.legacy.json` kept as the rollback / fallback source) |
+| `fallback_ops.py` | Heuristic `suggest()` for unresolved fallbacks (sender + subject only; reuses a category that already knows the sender) + `apply_decision()` (`category` / `new_category` / `once` / `exclude` / `skip`): creates or extends a category in `categories.json`, moves the folder out of `_לטיפול ידני`, marks `fallback_log.json` resolved, and upserts a `RESOLVED` history row (created from the fallback entry if no scan-time row exists). See [Applying a fallback decision](#startup-ui-apppy) |
+| `receipt_roots.py` | Discovers every destination root — main `קבלות`, the fallback dir, Japanologia, plus every category `destination` that isn't already inside one of those (a destination nested in another folds into the outermost one) — and guards `Api.browse` against filesystem access outside them. Backs the Receipts tab |
+| `categories.py` | A *category* is a complete filing recipe: it **matches** incoming mail (OR-list `match[]` of `{sender_contains, subject_contains, exclude_subject_contains, body_contains}`) and says **where** the receipt goes (one full `destination` folder) and **how** it is named (`seller` / `product` specs: fixed text, a regex extraction from the subject / body / sender name with an optional fallback, or `null` = the app's suggestion). `match_category()` returns `(seller, product, destination)` / `(EXCLUDE, None, None)` / `None`; first matching category wins. Also `resolve_spec`, `extract`, `validate_spec`, `query_terms()` (the providers' mailbox search terms) and the CRUD helpers behind the Categories tab. See [categories.json Format](#categoriesjson-format) |
+| `naming.py` | The app's default seller/product guess from the sender + subject only (seller from the registered domain, product from subject keywords). Shared by the scan engine (unset or missed seller/product) and the Fallbacks form prefill |
 | `ui_state.py` | Persists small window UI preferences (`hidden_roots`, `fallbacks_simple`, `rx_sort`) to `ui_state.json` (atomic write) |
 | `ui_state.json` | Runtime UI preferences — git-ignored |
 | `claude_handoff.py` | Opens a pre-seeded `claude` terminal — `launch()` for fallbacks that need manual classification, `launch_error()` for an error the UI surfaced, `launch_receipt()` for one right-clicked Receipts entry (all `cwd` the repo). Every seeded prompt ends with `NO_AUTO_CHANGES` — an instruction that the session must only investigate and propose, and change nothing until the user says so |
@@ -96,12 +97,14 @@ YYYY_MM_DD - Seller Name - Product Description - [account]
 | `test_receipt_saver.py` | Unit tests for `parse_date()`, the structured record shape, and `main()`'s progress callback |
 | `test_history.py` | Unit tests for `history.py` (append/dedup/update/page) |
 | `test_fallback_ops.py` | Unit tests for `suggest()` and `apply_decision()` |
+| `test_categories.py` / `test_categories_mutations.py` / `test_naming.py` / `test_migrate_categories_v2.py` | Unit tests for category matching + seller/product resolution, the CRUD helpers, the naming heuristic, and the v2 migration + its verifier |
 | `test_claude_handoff.py` | Unit tests for the Claude handoff prompt builder |
 | `test_app_api.py` | Unit tests for the `app.Api` data methods and scan orchestration |
 | `japanologia_backfill.py` | One-time script — backfills Japanese lesson attachments since April 15, 2026 |
 | `backfill_fallback_history.py` | One-off — writes `RESOLVED` history rows for fallbacks resolved before `history.upsert` existed (walks `fallback_log.json` for `resolved: true`, skips messages already in `history.json`). `--dry-run` to preview. Idempotent |
-| `migrate_rules_to_categories.py` | One-off, reversible — `custom_rules.json` → `categories.json`, 1 rule → 1 category. Dry run by default: prints the result and equivalence-checks old `match_custom` vs new `match_category` over every sender/subject in `history.json` + `fallback_log.json` plus a synthetic hit/miss per rule; refuses `--apply` on any routing diff. `--apply` writes `categories.json` and renames `custom_rules.json` → `custom_rules.legacy.json` (kept). Rollback: delete `categories.json`, rename the legacy file back |
-| `custom_rules.json` | User-defined sender rules — grows over time |
+| `migrate_categories_v2.py` | One-off, reversible — `categories.json` v1 (`base_dir` + `subfolder`, string seller/product, per-rule overrides) → v2 (one `destination`, seller/product specs). `product_body_regex` becomes a body extraction with the old static product as its fallback; exclude categories fold into the shared `excluded` category greedily, only where that doesn't change routing. Dry run by default, with an equivalence check of old vs new (seller, product, destination) over every sender/subject in `history.json` + `fallback_log.json` plus a synthetic hit per rule; refuses `--apply` on any difference. `--apply` backs v1 up to `categories.v1.json`. **Applied 2026-10-05** (34 → 31 categories, 112 cases identical). The earlier v0→v1 `migrate_rules_to_categories.py` was retired (it's in git history) |
+| `categories.json` | The categories (see `categories.py`) — grows as you file fallbacks; edited in the **Categories** tab |
+| `custom_rules.legacy.json` / `categories.v1.json` | Pre-migration backups of the old rule formats. Nothing reads them any more |
 | `fallback_log.json` | Log of all unrecognized emails |
 | `processed_ids.json` | Tracks every email already seen — prevents duplicates |
 | `receipt_saver.log` | Full activity log with timestamps, full paths, and saved filenames |
@@ -157,6 +160,8 @@ Every email found in Gmail goes through the following pipeline:
         ┌────────────────────────────┐
         │  ICOUNT PATH               │
         │  • Create folder in קבלות  │
+        │    (or the category's      │
+        │    destination)            │
         │  • Save email.pdf          │
         │  • NO attachments saved    │
         │  • TickTick task (medium   │
@@ -174,7 +179,7 @@ Every email found in Gmail goes through the following pipeline:
                      ▼
            ┌─────────────────────┐
            │  Matches a          │
-           │  CUSTOM RULE?       │──── YES ──→ KNOWN PATH (see below)
+           │  CATEGORY?          │──── YES ──→ KNOWN PATH (see below)
            └─────────┬───────────┘
                      │ NO
                      ▼
@@ -195,6 +200,8 @@ Every email found in Gmail goes through the following pipeline:
 KNOWN PATH:
         ┌────────────────────────────┐
         │  • Create folder in קבלות  │
+        │    (or the category's      │
+        │    destination)            │
         │  • Save all attachments    │
         │  • Save email.pdf          │
         │  • Mark as processed       │
@@ -231,9 +238,14 @@ These are permanent rules that never need updating:
 | `stripe.com` | Extracted from subject | מנוי | — | Stripe-powered subscriptions |
 | `icount.co.il` | Extracted from subject | חשבונית מס קבלה | — | **Special handling** — see iCount section |
 
-### Custom Rules (in custom_rules.json)
+### Categories (in categories.json)
 
-These were added through manual review sessions with Claude:
+Managed in the app's **Categories** tab, and grown by filing fallbacks. The
+table below is the set migrated from the old `custom_rules.json`; since the
+2026-10-05 remodel each category has a single destination folder (the old
+*Category* sub-folder and *Base Dir* columns combined), and the excluded
+senders live in the shared `excluded` category (except the `sternum-sec.com`
+one, which must stay after the salary category to keep routing identical):
 
 | Sender Domain | Subject Contains | Seller | Product | Category | Base Dir |
 |---------------|-----------------|--------|---------|----------|----------|
@@ -357,24 +369,36 @@ with margin added so the window can be shrunk without ever clipping the
 titlebar or toolbars; `html, body { overflow-x: hidden }` is a second,
 belt-and-suspenders guarantee that no horizontal scrollbar can appear.
 
-**Four views:**, switched via the titlebar tabs (a faded vertical divider separates each tab so they don't read as merged together).
+**Five views:**, switched via the titlebar tabs (a faded vertical divider separates each tab so they don't read as merged together).
 
 | View | What it shows |
 |------|---------------|
 | **This run** | On a manual launch, opens idle with a **"Run scan"** button (no scan happens until it's clicked, the titlebar ⟲ is pressed, or the tray's "Run scan now" is used); on an `--autostart` login launch, the scan starts immediately and this tab shows it live. Live results: a card per handled mail, plus a **per-account status list** (`ofek ✓ · yuval ✓ · sternum ⚠ needs re-authorization …`) driven by `connecting` / `account` / `error` / `done` events — so a slow or failing account is visible immediately instead of the view looking stuck. The scan always resolves to a definite sentence — `Scan complete — N new receipts saved` / `…no new mail found` / `Scan stopped early — see errors above`; re-opening the tab reconciles it from `Api.get_run()`. Each surfaced error (scan-error rows and error toasts) carries an **Ask Claude** button (Claude-mark icon) — it calls `Api.ask_claude_error(text)`, which opens a `claude` terminal in the repo pre-seeded to debug that error. |
 | **History** | Every mail handled since the UI shipped, newest first, lazy-loaded on scroll, with a text filter over sender/subject/seller. Backed by `history.json`. Resolved-fallback rows show `· resolved <date> by you/Claude/backfill`. The card's folder link (shared `#tpl-card`, so **This run** too) is the icon-only outlined-folder glyph, not an "Open folder" text link. |
-| **Fallbacks** | Unresolved `fallback_log.json` entries (badge shows the count). Each row has a form pre-filled by a heuristic guess (`fallback_ops.suggest`, sender + subject only — no body, no network, no AI). Pick **File under a category** / **Move this one only** / **Exclude as promotional** / **Skip for now**, adjust fields, **Apply**. **File under a category** uses a searchable combobox (`.combo.f-cat-assign`, built by `makeCombo`): **＋ New category…** is pinned as the first row, followed by one row per non-excluded category shown as `name — subfolder`; typing filters the list live on every keystroke (↑/↓/Enter/Esc supported). Picking **＋ New category…** reveals a name field and submits `kind:new_category` + `category_name`; picking an existing category submits `kind:category` + `category_id` and prefills its seller/product (editable — a per-bill override) while pinning its route. The fields block (`.fb-fields`) carries a contextual heading (`.fb-fields-head`) — "New category …" / "Category: «name» …" / "This receipt only …" — and is hidden entirely for **Exclude** / **Skip**. Its **Sub-folder** field (`input.f-category`, backed by `<datalist id="fb-subfolders">` filled from `Api.categories()`) is the folder under the destination root that groups related bills (e.g. `חשבנות/חשמל`); for an existing category the Sub-folder, Destination root and both Match fields are shown read-only, and the Match fields are hidden for **Move this one only**. The **Destination root** field is a dropdown (`select.f-basedir`, filled by `fillBasedirSelect` from `Api.list_roots`): `קבלות (default)`, every known root, then **＋ Choose a folder…** — that last option calls `Api.pick_folder` (pywebview `FOLDER_DIALOG`) and adds whatever you browse to as a new selected option; cancelling restores the previous choice. Submitting with a non-default root sets `decision.base_dir`, so a new category records it and it auto-appears in the dropdown (and the Receipts rail) from then on. Multi-select + the icon-only **Claude-mark → button** (`#fb-handoff`, no "Handle selected with Claude" label, just the mark and an arrow) opens a pre-seeded `claude` terminal for the hard ones. Each row also has its own icon-only Claude button (Claude-mark SVG, no label — `fallbackClaudeButton`) for a single-entry handoff, and an icon-only outlined-folder link (the same SVG as the Receipts explorer's folder icon, not the emoji-based one) instead of an "Open folder" text link. A **Simple view** toggle collapses every entry to a one-line row (subject + `sender · account · date` + confidence); click a row to expand its full form. The toggle persists in `ui_state.json`. |
-| **Receipts** | Read-only explorer. Left rail lists every destination root (`receipt_roots.discover_roots` — main `קבלות`, `_לטיפול ידני`, Japanologia, and each custom-rule `base_dir`; roots not yet created are dimmed), each entry separated from the next by a faded divider line. The right pane is a breadcrumb navigator over the selected root: click a folder to descend, a crumb to jump to an ancestor, the **‹** button (or **Alt+←**) to step back through visited folders, double-click a file to open it in its default app, or the outlined-folder icon button to open the current folder in Windows Explorer (an inline SVG using `currentColor`, so it matches the app's palette exactly instead of the mismatched colors of a Windows folder emoji). The breadcrumb trail stays on one line — a crumb too long for the available width is clipped with an ellipsis, and hovering any crumb (or a row) shows its full path in a native tooltip. Two **sort** buttons in the toolbar toggle the field (**Name** / **Date**) and direction (**↑** / **↓**); folders always sort before files, the choice persists in `ui_state.json` (`rx_sort`, default `date_desc`), and Date order uses the `YYYY_MM_DD` prefix of dated folders, otherwise the filesystem mtime. Dated `YYYY_MM_DD - Seller - Product - label` folders are parsed for display: each row shows the cleaned **Seller - Product** title, a human date (`25 Aug 2026`) and an account chip, with a 📁 folder glyph (they're still real folders — one PDF, occasionally more, inside; glyphs are desaturated with CSS `grayscale` to match the app's monochrome look), each in a shaded box. Plain folders and files show their raw name. A search box at the top runs `Api.search_receipts` — a recursive, depth-capped walk of **every** root — once 2+ characters are typed, and lists matches as `root / relative\path`; clearing it back below 2 characters restores the plain (non-recursive) current-folder listing. Clicking a folder in the results leaves search mode and navigates into that folder — `rxExitSearch({ noBrowse: true })` suppresses its usual re-browse of the pre-search folder so the two navigations don't race (the stale re-browse used to win and snap you back to where you searched from); the Back button while searching uses the same guard. Any root can be hidden with its `⊘` button (it moves to a **Hidden** section) and restored with `＋`; the set persists in `ui_state.json`. **Right-click any row** for a one-item **Ask Claude** menu that opens a `claude` terminal seeded with a prompt about that entry (see *Capabilities with Claude → Right-click an explorer entry*). No writes — `Api.browse` refuses any path outside the known roots. |
+| **Fallbacks** | Unresolved `fallback_log.json` entries (badge shows the count). Each row has a form pre-filled by `fallback_ops.suggest` (sender + subject only — no body, no network, no AI; a category that already knows the sender is preselected). Four options: **File under a category** / **Exclude as promotional** / **Move this one only** / **Skip**, then **Apply**. **File under a category** uses a searchable combobox (`.combo.f-cat-assign`, built by `makeCombo`): **＋ New category…** pinned first, then one row per non-excluded category shown as `name — destination`; typing filters live (↑/↓/Enter/Esc). The fields block (`.fb-fields`, contextual heading `.fb-fields-head`) changes with the choice: **New category** — name, **Destination**, **Seller**, **Product** and a **Match rule**, all editable; **existing category** — destination pinned to the category, Seller/Product prefilled with what *this mail* resolves to under that category (`Api.preview_category`; editable as a one-off for this mail, the category's settings stay as they are), its current rules listed read-only plus one new rule row that gets added; **Move this one only** — destination + plain seller/product, no rule; **Exclude** — the match rule only (sender prefilled; add e.g. a subject condition to narrow it); **Skip** — nothing. **Destination** is a searchable combobox (`makeDestPicker`): **📁 Browse…** pinned first (`Api.pick_folder` → the Windows folder dialog, which can also create a new folder), then every folder from `Api.destination_suggestions` — category destinations + folders History filed into + every root (never `_לטיפול ידני`), most-used first, shown compactly as `קבלות › חשבנות › חשמל` with the full path on hover. **Seller** / **Product** each use the same widget (`#tpl-namefield`, `makeNameField`): a value prefilled with the app's suggestion, a **Use for every mail** tick (ticked → saved on the category as fixed text; unticked → this mail only, future mails get the app's suggestion) and **⚙ Extract** — pick Subject / Body / Sender name and type a regex; the value box becomes *If no match* and a live preview (`Api.preview_extract`, run in Python so it behaves exactly like the scan) shows the result, a miss, or a regex error. The Body source fetches the mail text from Gmail/Outlook by message id on first use and caches it for the session. Multi-select + the icon-only **Claude-mark → button** (`#fb-handoff`) opens a pre-seeded `claude` terminal for the hard ones; each row also has its own icon-only Claude button (`fallbackClaudeButton`) and an icon-only outlined-folder link. A **Simple view** toggle collapses every entry to a one-line row (subject + `sender · account · date` + confidence); click a row to expand its full form. The toggle persists in `ui_state.json`. |
+| **Categories** | Every category in `categories.json`, one row each: name, a summary (`destination · seller: … · product: …`, where each is the fixed text, `from subject/body/sender name`, or `app suggestion`), the rule count, **merge into…** (moves this category's rules into another; the target's destination and naming apply from then on), **Save** and **✕**. **▸** expands an editor with the same Destination picker and Seller/Product widgets as the Fallbacks form (no preview — there's no mail to test against; an invalid regex is rejected on Save), the match rules (each removable) and an **Add rule** row. **Add category** creates one filing into `קבלות` with no rules yet. The shared `excluded` category (and any other exclude category) shows only its rules. |
+| **Receipts** | Read-only explorer. Left rail lists every destination root (`receipt_roots.discover_roots` — main `קבלות`, `_לטיפול ידני`, Japanologia, and every category destination outside those; roots not yet created are dimmed), each entry separated from the next by a faded divider line. The right pane is a breadcrumb navigator over the selected root: click a folder to descend, a crumb to jump to an ancestor, the **‹** button (or **Alt+←**) to step back through visited folders, double-click a file to open it in its default app, or the outlined-folder icon button to open the current folder in Windows Explorer (an inline SVG using `currentColor`, so it matches the app's palette exactly instead of the mismatched colors of a Windows folder emoji). The breadcrumb trail stays on one line — a crumb too long for the available width is clipped with an ellipsis, and hovering any crumb (or a row) shows its full path in a native tooltip. Two **sort** buttons in the toolbar toggle the field (**Name** / **Date**) and direction (**↑** / **↓**); folders always sort before files, the choice persists in `ui_state.json` (`rx_sort`, default `date_desc`), and Date order uses the `YYYY_MM_DD` prefix of dated folders, otherwise the filesystem mtime. Dated `YYYY_MM_DD - Seller - Product - label` folders are parsed for display: each row shows the cleaned **Seller - Product** title, a human date (`25 Aug 2026`) and an account chip, with a 📁 folder glyph (they're still real folders — one PDF, occasionally more, inside; glyphs are desaturated with CSS `grayscale` to match the app's monochrome look), each in a shaded box. Plain folders and files show their raw name. A search box at the top runs `Api.search_receipts` — a recursive, depth-capped walk of **every** root — once 2+ characters are typed, and lists matches as `root / relative\path`; clearing it back below 2 characters restores the plain (non-recursive) current-folder listing. Clicking a folder in the results leaves search mode and navigates into that folder — `rxExitSearch({ noBrowse: true })` suppresses its usual re-browse of the pre-search folder so the two navigations don't race (the stale re-browse used to win and snap you back to where you searched from); the Back button while searching uses the same guard. Any root can be hidden with its `⊘` button (it moves to a **Hidden** section) and restored with `＋`; the set persists in `ui_state.json`. **Right-click any row** for a one-item **Ask Claude** menu that opens a `claude` terminal seeded with a prompt about that entry (see *Capabilities with Claude → Right-click an explorer entry*). No writes — `Api.browse` refuses any path outside the known roots. |
 
 **Applying a fallback decision** (`fallback_ops.apply_decision`):
 
-- `rule` — append a rule to `custom_rules.json`, move + rename the folder from
-  `_לטיפול ידני` to the computed destination, mark resolved, set the history row
-  to `RESOLVED`.
-- `once` — same, minus the `custom_rules.json` write.
-- `exclude` — append an `{"exclude": true}` rule, delete the folder, log to
-  `cleanup_log.json`, mark resolved.
-- `skip` — nothing; the row stays for next time.
+The form sends `{kind, category_id | category_name, destination, seller,
+product, match}`, where `seller` / `product` are `{value, every_mail, extract}` —
+`value` is always what *this* mail's folder is named with; `every_mail` /
+`extract` only shape what a **new** category remembers.
+
+- `new_category` — create a category (destination, seller/product specs from the
+  tick / extraction, the match rule), move + rename the folder from
+  `_לטיפול ידני` into the destination, mark resolved, history row `RESOLVED`
+  (`resolution: category`). An invalid regex or a rule with neither a sender nor
+  a subject condition is rejected before anything moves.
+- `category` — add the match rule to an existing category and file into *its*
+  destination (its seller/product settings are left as they are).
+- `once` — move + rename into the chosen destination; no category is written.
+- `exclude` — add the match rule to the shared `excluded` category, delete the
+  folder, log to `cleanup_log.json`, mark resolved.
+- `skip` — **dismiss**: mark resolved and record `resolution: dismissed` in
+  History; the folder stays in `_לטיפול ידני` and nothing is remembered, so a
+  similar mail later lands in fallbacks again.
 
 The `RESOLVED` history write is an **upsert** (`history.upsert`), not a plain
 `history.update`: it patches the fallback's existing history row if there is one,
@@ -384,8 +408,7 @@ otherwise it appends a fresh row seeded from the `fallback_log.json` entry
 to `user`; callers pass `resolved_by="claude"` for batch resolves. Plain `update` silently dropped
 the write whenever no scan-time `FALLBACK` row existed (e.g. `history.json` not
 yet created, or the fallback logged before scan-time history recording), so
-hand-resolved fallbacks never showed up in the History tab. `skip` still writes
-nothing.
+hand-resolved fallbacks never showed up in the History tab.
 
 After a successful **Apply**, the UI also calls `refreshHistory()` (drops the
 cached page state and re-fetches from the top), so the new `RESOLVED` row shows
@@ -448,11 +471,11 @@ The script builds the Gmail query dynamically at runtime:
 )
 ```
 
-The `from:` exceptions are generated automatically from every domain-based `match_sender_contains` entry in `custom_rules.json`. Adding a new custom rule with a domain automatically updates the query — no manual changes needed. The Japanese lesson clause is hardcoded in `build_gmail_query()`, which now lives in `gmail_provider.py` (called via `gmail_provider.list_candidate_ids()`).
+The `from:` exceptions are generated automatically from every domain-based `sender_contains` in `categories.json` (`categories.query_terms()`, exclude categories included). Adding a category rule with a domain automatically updates the query — no manual changes needed. The Japanese lesson clause is hardcoded in `build_gmail_query()`, which now lives in `gmail_provider.py` (called via `gmail_provider.list_candidate_ids()`).
 
 **Key behaviors:**
 - Emails with attachments matching subject keywords are always included
-- Known senders (from custom_rules.json) are always included even without attachments — their email body is saved as `email.pdf`
+- Known senders (from categories.json) are always included even without attachments — their email body is saved as `email.pdf`
 - SENT folder is always excluded
 - Looks back 60 days on every run
 - Already-processed email IDs are stored in `processed_ids.json` — each email is processed only once regardless of how many times the script runs
@@ -488,7 +511,7 @@ Trigger this by opening this chat and saying the phrase. You will need to paste 
 3. Classifies each email — is it a receipt? Who is the seller? What is the product?
 4. Presents a classification table for your approval
 5. On approval:
-   - Provides an updated `custom_rules.json` so the sender is recognized automatically next time
+   - Adds the sender to `categories.json` (or tells you what to enter in the Fallbacks form) so it is recognized automatically next time
    - Provides a `move_fallbacks.py` script that renames and moves the folders from `_לטיפול ידני\` to the main `קבלות\` directory with correct names
    - Updates all resolved entries in `fallback_log.json`
 
@@ -498,7 +521,7 @@ You can tell Claude directly to add a rule, for example:
 - *"emails from noreply@bezeq.co.il are receipts from בזק - חשבונית חודשית"*
 - *"emails from amazon.com with 'order' in the subject are from Amazon - הזמנה"*
 
-Claude will provide an updated `custom_rules.json` to replace in your scripts folder.
+Claude will update `categories.json` (you can also do it yourself in the **Categories** tab).
 
 ### Asking about your receipts
 
@@ -523,45 +546,39 @@ scroll.
 
 ---
 
-## custom_rules.json Format
+## categories.json Format
 
-```json
+```jsonc
 [
   {
-    "_comment": "Optional description",
-    "match_sender_contains": "domain.co.il",
-    "match_subject_contains": null,
-    "seller": "Seller Name",
-    "product": "Product Description",
-    "category": "חשבנות/חשמל"
+    "id": "electricity",                       // stable slug
+    "name": "חשמל",                            // display name
+    "destination": "C:\\Users\\ofeks\\OneDrive\\Documents\\קבלות\\חשבנות\\חשמל",
+    "seller":  { "mode": "fixed", "value": "חברת חשמל לישראל" },
+    "product": { "mode": "extract", "source": "body",
+                 "regex": "(תלוש שכר לחודש \\S+ \\d{4})", "fallback": "תלוש שכר" },
+    "exclude": false,
+    "match": [
+      { "sender_contains": "iec.co.il" },
+      { "sender_contains": "onecity.co.il", "subject_contains": "חשמל",
+        "exclude_subject_contains": "פרסומת", "body_contains": "מספר חשבון" }
+    ]
   }
 ]
 ```
 
-- `match_sender_contains` — required, substring match on the sender email address
-- `match_subject_contains` — optional, substring match on the subject line (use when same platform sends for multiple sellers, e.g. iCount)
-- `exclude_subject_contains` — optional, skip the email if the subject contains this string (e.g. `פרסומת` to skip promotional emails)
-- `match_body_contains` — optional, skip the email if the plain-text body does NOT contain this string (e.g. `מספר הזמנה` to require an actual order number)
-- `product_body_regex` — optional, regex with one capture group to extract the product name from the email body (overrides the static `product` field when matched)
-- `seller` — the name that appears in the folder
-- `product` — the product/service description in the folder name
-- `category` — optional, subdirectory path under the base directory (e.g. `חשבנות/ארנונה`). Omit or set to `null` for no subcategory.
-- `base_dir` — optional, absolute path to a different root directory. If omitted, defaults to `קבלות\`. Use for receipts belonging to a specific property or project.
-- `exclude` — optional, set to `true` to silently skip matching emails (e.g. promotional newsletters). No folder is created, logged as EXCLUDED.
+- `destination` — the full folder path matched receipts are filed into (`null` → `קבלות`). Several categories may share one (e.g. every electricity provider → `קבלות\חשבנות\חשמל`).
+- `seller` / `product` — a spec:
+  - `{"mode": "fixed", "value": …}` — always this text
+  - `{"mode": "extract", "source": "subject" | "body" | "sender_name", "regex": …, "fallback"?: …}` — the first `( )` group of the regex (or the whole match), folder-sanitized; `fallback` when it doesn't match
+  - `null` — the app's suggestion (`naming.suggest_names`)
 
-### Categories
+  Resolution per mail: fixed → extraction → `fallback` → app suggestion, so a folder name is never empty.
+- `match` — OR-list; a mail matches an entry when **all** its conditions hold: `sender_contains` / `subject_contains` (case-insensitive substrings), `exclude_subject_contains` (subject must *not* contain it), `body_contains` (case-sensitive, whitespace-normalised plain-text body). Each entry needs a sender or subject condition.
+- `exclude` — `true` silently skips matching mail (no folder, logged as `EXCLUDED`). New exclusions from the Fallbacks form go into the shared `excluded` category.
+- Categories are checked in file order; the first category with a matching entry wins.
 
-Receipts can be routed into subcategories under `קבלות\חשבנות\`:
-
-| Category path | Hebrew | Description |
-|---------------|--------|-------------|
-| `חשבנות/חשמל` | חשמל | Electricity bills |
-| `חשבנות/מיים` | מיים | Water bills |
-| `חשבנות/ארנונה` | ארנונה | Municipal tax |
-| `חשבנות/אינטרנט` | אינטרנט | Internet bills |
-| `חשבנות/גז` | גז | Gas bills |
-
-Both hardcoded rules (4th tuple element) and custom rules (`category` field) support categories.
+The hardcoded `KNOWN_RULES` in `receipt_saver.py` still run *before* categories (and still file into `קבלות` sub-folders such as `חשבנות/אינטרנט`); converting them into categories is a planned follow-up.
 
 ---
 

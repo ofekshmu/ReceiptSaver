@@ -4,7 +4,6 @@ const api = () => window.pywebview.api;
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 
-let CATEGORIES = [];
 let histOffset = 0, histLoading = false, histDone = false, histRows = [];
 let fbSimple = false;
 
@@ -309,14 +308,7 @@ new IntersectionObserver(es => {
 }).observe($("#hist-sentinel"));
 
 // ---- fallbacks view ----------------------------------------------------
-function fillSubfolderList() {
-  const dl = $("#fb-subfolders");
-  if (dl) dl.innerHTML = CATEGORIES.map(c => `<option value="${c}"></option>`).join("");
-}
-
 async function loadFallbacks() {
-  if (!CATEGORIES.length) CATEGORIES = await api().categories();
-  fillSubfolderList();
   const st = await api().get_ui_state();
   fbSimple = !!st.fallbacks_simple;
   $("#fb-viewtoggle").textContent = fbSimple ? "Detailed view" : "Simple view";
@@ -374,55 +366,12 @@ function fbHeader(scope, it) {
   $(".fb-check", scope).addEventListener("change", updateHandoffButton);
 }
 
-// "Destination root" dropdown: the default קבלות, every known root, and a
-// "Choose a folder…" sentinel that opens the OS folder picker (Api.pick_folder)
-// and adds whatever you pick as a new, selected option.
-const FB_BROWSE = "__browse__";
-let FB_ROOTS = null;
-
-async function fillBasedirSelect(sel, current) {
-  if (!FB_ROOTS) {
-    try { FB_ROOTS = await api().list_roots(); } catch (_) { FB_ROOTS = []; }
-  }
-  const opt = (v, label) => {
-    const o = document.createElement("option");
-    o.value = v; o.textContent = label;
-    return o;
-  };
-  sel.innerHTML = "";
-  sel.appendChild(opt("", "קבלות (default)"));
-  const known = new Set();
-  for (const r of FB_ROOTS) {
-    known.add(r.path);
-    sel.appendChild(opt(r.path, `${r.label} — ${r.path}`));
-  }
-  if (current && !known.has(current)) sel.appendChild(opt(current, current));
-  sel.appendChild(opt(FB_BROWSE, "＋ Choose a folder…"));
-  sel.value = current || "";
-  let last = sel.value;
-  sel.addEventListener("change", async () => {
-    if (sel.value !== FB_BROWSE) { last = sel.value; return; }
-    let res;
-    try { res = await api().pick_folder(); } catch (_) { res = { ok: false }; }
-    if (res && res.ok && res.path) {
-      if (![...sel.options].some(o => o.value === res.path)) {
-        sel.insertBefore(opt(res.path, res.path),
-                         sel.querySelector(`option[value="${FB_BROWSE}"]`));
-      }
-      sel.value = res.path;
-      last = res.path;
-    } else {
-      sel.value = last;                 // cancelled — restore previous choice
-      if (res && !res.ok) toast((res && res.error) || "Couldn't open folder picker", true);
-    }
-  });
-}
-
-// Minimal searchable combobox over a fixed item list. `root` is a `.combo`
-// element holding `.combo-input` + `.combo-list`; the chosen value lives in
-// `root.dataset.value`. items: [{value, label}]. The first item stays pinned
-// (shown even when the current filter would exclude it). onChange(value) fires
-// only on an actual pick, never on mere typing.
+// Minimal searchable combobox over an item list. `root` is a `.combo` element
+// holding `.combo-input` + `.combo-list`; the chosen value lives in
+// `root.dataset.value`. items: [{value, label}] — the array may grow later
+// (push + setValue). The first item stays pinned (shown even when the current
+// filter would exclude it). onChange(value, prev) fires only on an actual
+// pick, never on mere typing.
 function makeCombo(root, { items, onChange }) {
   const input = $(".combo-input", root);
   const list = $(".combo-list", root);
@@ -435,7 +384,8 @@ function makeCombo(root, { items, onChange }) {
   function render(q) {
     const needle = (q || "").trim().toLowerCase();
     view = items.filter((it, i) =>
-      i === 0 || !needle || it.label.toLowerCase().includes(needle));
+      i === 0 || !needle || it.label.toLowerCase().includes(needle)
+              || String(it.value).toLowerCase().includes(needle));
     list.innerHTML = "";
     if (!view.length) {
       const li = document.createElement("li");
@@ -447,6 +397,7 @@ function makeCombo(root, { items, onChange }) {
     view.forEach((it, i) => {
       const li = document.createElement("li");
       li.textContent = it.label;
+      if (it.title) li.title = it.title;
       if (i === active) li.classList.add("is-active");
       if (it.value === root.dataset.value) li.classList.add("is-current");
       li.addEventListener("mousedown", e => { e.preventDefault(); choose(it); });
@@ -455,11 +406,17 @@ function makeCombo(root, { items, onChange }) {
   }
   function open() { render(input.value === curLabel() ? "" : input.value); list.hidden = false; }
   function close() { list.hidden = true; active = -1; }
+  function setValue(v) {
+    root.dataset.value = v;
+    input.value = labelFor(v);
+    const it = items.find(x => x.value === v);
+    input.title = (it && it.title) || "";
+  }
   function choose(it) {
-    root.dataset.value = it.value;
-    input.value = it.label;
+    const prev = root.dataset.value;
+    setValue(it.value);
     close();
-    onChange(it.value);
+    onChange(it.value, prev);
   }
 
   input.addEventListener("focus", () => { input.select(); open(); });
@@ -478,138 +435,333 @@ function makeCombo(root, { items, onChange }) {
     else if (e.key === "Escape") { input.value = curLabel(); close(); }
   });
 
-  return { setValue(v) { root.dataset.value = v; input.value = labelFor(v); } };
+  return {
+    setValue,
+    get value() { return root.dataset.value; },
+    setDisabled(off) { input.disabled = off; root.classList.toggle("is-disabled", off); },
+  };
 }
 
-// "File under a category" picker: ＋ New category… (sentinel) + one entry per
-// existing category. Picking an existing one prefills seller/product (editable
-// per-bill overrides) and pins the route/subfolder to that category.
+// ---- destination picker -------------------------------------------------
+// 📁 Browse… (pinned) + every destination ranked by use (Api.destination_suggestions).
+const DEST_BROWSE = "__browse__";
+let DESTS = null;       // [{path, label, count}] — cleared whenever categories change
+
+async function loadDests() {
+  if (!DESTS) {
+    try { DESTS = await api().destination_suggestions(); } catch (_) { DESTS = []; }
+  }
+  return DESTS;
+}
+
+// Compact label for a folder: its own suggestion label, else the label of the
+// deepest known folder containing it + the remaining parts ("קבלות › a › b").
+function destLabel(path) {
+  const p = String(path || ""), lp = p.toLowerCase();
+  const exact = (DESTS || []).find(x => x.path.toLowerCase() === lp);
+  if (exact) return exact.label;
+  let best = null;
+  for (const d of DESTS || []) {
+    const dp = d.path.toLowerCase().replace(/[\\/]+$/, "");
+    if (lp.startsWith(dp + "\\") && (!best || dp.length > best.path.length)) best = d;
+  }
+  if (!best) return p;
+  const rest = p.slice(best.path.replace(/[\\/]+$/, "").length + 1).split(/[\\/]+/).filter(Boolean);
+  return [best.label, ...rest].join(" › ");
+}
+
+async function makeDestPicker(root, current) {
+  const dests = await loadDests();
+  const items = [{ value: DEST_BROWSE, label: "📁 Browse…", title: "Open the Windows folder picker (it can also create a new folder)" }];
+  for (const d of dests) items.push({ value: d.path, label: d.label, title: d.path });
+  const ensure = path => {
+    if (path && !items.some(i => i.value.toLowerCase() === path.toLowerCase()))
+      items.push({ value: path, label: destLabel(path) || path, title: path });
+    const hit = items.find(i => i.value.toLowerCase() === String(path || "").toLowerCase());
+    return hit ? hit.value : path;
+  };
+  const combo = makeCombo(root, {
+    items,
+    onChange: async (val, prev) => {
+      if (val !== DEST_BROWSE) return;
+      let res;
+      try { res = await api().pick_folder(); } catch (_) { res = { ok: false }; }
+      if (res && res.ok && res.path) combo.setValue(ensure(res.path));
+      else {
+        combo.setValue(prev);              // cancelled — restore previous choice
+        if (res && !res.ok) toast(res.error || "Couldn't open folder picker", true);
+      }
+    },
+  });
+  const fallback = dests.length ? dests[0].path : "";
+  combo.setValue(ensure(current || fallback));
+  return Object.assign(combo, { set(path) { combo.setValue(ensure(path)); } });
+}
+
+// ---- seller / product field --------------------------------------------
+// A value, a "use for every mail" tick, or an extraction rule (source + regex)
+// with a live preview. preview(source, regex) -> {ok, value, error}; omit it
+// where there is no mail to test against (Categories tab).
+function makeNameField(slot, { spec, value, preview }) {
+  const n = $("#tpl-namefield").content.cloneNode(true).querySelector(".nf");
+  slot.innerHTML = "";
+  slot.appendChild(n);
+  const val = $(".nf-value", n), every = $(".nf-every-cb", n), everyLbl = $(".nf-every", n);
+  const xbtn = $(".nf-x-toggle", n), xbox = $(".nf-extract", n);
+  const src = $(".nf-source", n), rx = $(".nf-regex", n), out = $(".nf-preview", n);
+  let extractOn = false, simple = false, lastHit = null, timer = 0, seq = 0;
+
+  function paint() {
+    xbox.hidden = !extractOn || simple;
+    xbtn.classList.toggle("on", extractOn);
+    xbtn.hidden = simple;
+    everyLbl.hidden = simple || extractOn;
+    val.placeholder = extractOn && !simple ? "If no match (blank = app suggestion)" : "";
+    out.hidden = !preview;
+  }
+  async function runPreview() {
+    if (!preview || !extractOn) return;
+    const mine = ++seq;
+    if (!rx.value.trim()) { out.textContent = ""; out.className = "nf-preview"; lastHit = null; return; }
+    out.textContent = src.value === "body" ? "fetching email…" : "…";
+    out.className = "nf-preview";
+    let res;
+    try { res = await preview(src.value, rx.value); } catch (e) { res = { ok: false, error: String(e) }; }
+    if (mine !== seq) return;                       // a newer keystroke won
+    lastHit = res && res.ok ? res.value : null;
+    if (!res || !res.ok) { out.textContent = (res && res.error) || "preview failed"; out.className = "nf-preview bad"; }
+    else if (res.value) { out.textContent = "→ " + res.value; out.className = "nf-preview good"; }
+    else { out.textContent = "no match — " + (val.value.trim() ? `uses “${val.value.trim()}”` : "uses the app suggestion"); out.className = "nf-preview warn"; }
+  }
+  const schedule = () => { clearTimeout(timer); timer = setTimeout(runPreview, 250); };
+
+  xbtn.addEventListener("click", () => { extractOn = !extractOn; paint(); if (extractOn) { rx.focus(); schedule(); } });
+  rx.addEventListener("input", schedule);
+  src.addEventListener("change", schedule);
+  val.addEventListener("input", () => { if (extractOn && !lastHit) schedule(); });
+
+  function load(sp, v) {
+    // spec: fixed / extract / null ("app suggestion" → unticked) / undefined (fresh → ticked)
+    extractOn = !!(sp && sp.mode === "extract");
+    if (sp && sp.mode === "fixed") { val.value = sp.value || ""; every.checked = true; }
+    else if (extractOn) {
+      src.value = sp.source || "subject"; rx.value = sp.regex || "";
+      val.value = sp.fallback || ""; every.checked = true;
+    }
+    else { val.value = v || ""; every.checked = sp === undefined; }
+    lastHit = null; out.textContent = "";
+    paint();
+    if (extractOn) schedule();
+  }
+  load(spec, value);
+
+  return {
+    load,
+    setSimple(on) { simple = on; paint(); },
+    setValue(v) { val.value = v || ""; },
+    get value() { return val.value.trim(); },
+    // what THIS mail is named with + how a new category should remember it
+    field() {
+      if (extractOn && !simple) {
+        return { value: lastHit || val.value.trim(), every_mail: true,
+                 extract: { source: src.value, regex: rx.value, fallback: val.value.trim() } };
+      }
+      return { value: val.value.trim(), every_mail: every.checked, extract: null };
+    },
+    // the spec to store on a category (Categories tab)
+    spec() {
+      if (extractOn) {
+        const s = { mode: "extract", source: src.value, regex: rx.value };
+        if (val.value.trim()) s.fallback = val.value.trim();
+        return s;
+      }
+      return every.checked && val.value.trim() ? { mode: "fixed", value: val.value.trim() } : null;
+    },
+  };
+}
+
+function specSummary(sp) {
+  if (!sp) return "app suggestion";
+  if (sp.mode === "fixed") return sp.value;
+  const where = { subject: "subject", body: "body", sender_name: "sender name" }[sp.source] || sp.source;
+  return `from ${where}`;
+}
+
+function matchText(m) {
+  return [m.sender_contains && `from ${m.sender_contains}`,
+          m.subject_contains && `subject ~ “${m.subject_contains}”`,
+          m.exclude_subject_contains && `subject ≁ “${m.exclude_subject_contains}”`,
+          m.body_contains && `body ~ “${m.body_contains}”`].filter(Boolean).join("  ·  ")
+         || "(empty rule)";
+}
+
+function readMatch(scope) {
+  return {
+    sender_contains: $(".f-sender", scope).value.trim(),
+    subject_contains: $(".f-subject", scope).value.trim(),
+    exclude_subject_contains: $(".f-subject-not", scope).value.trim(),
+    body_contains: $(".f-body", scope).value.trim(),
+  };
+}
+
+// ---- the fallback form ---------------------------------------------------
 const FB_NEWCAT = "__new__";
 let FB_CATS = null;
 
-async function fillCatAssign(scope, s) {
-  const root = $(".f-cat-assign", scope);
-  if (!root) return;
+async function loadCats() {
   if (!FB_CATS) {
     try { FB_CATS = await api().list_categories(); } catch (_) { FB_CATS = []; }
   }
-  const nameInput = $(".f-cat-name", scope);
-  const subEl = $(".f-category", scope);
-  const baseSel = $(".f-basedir", scope);
-
-  const items = [{ value: FB_NEWCAT, label: "＋ New category…" }];
-  FB_CATS.filter(c => !c.exclude).forEach(c =>
-    items.push({ value: c.id, label: `${c.name}${c.subfolder ? " — " + c.subfolder : ""}` }));
-
-  const apply = val => {
-    const cat = val === FB_NEWCAT ? null : FB_CATS.find(c => c.id === val);
-    nameInput.hidden = !!cat;
-    // an existing category owns seller/product defaults + the route it prefills
-    if (cat) {
-      $(".f-seller", scope).value = cat.seller || "";
-      $(".f-product", scope).value = cat.product || "";
-      if (subEl) subEl.value = cat.subfolder || "";
-      if (baseSel && ![...baseSel.options].some(o => o.value === (cat.base_dir || "")))
-        baseSel.appendChild(Object.assign(document.createElement("option"),
-          { value: cat.base_dir || "", textContent: cat.base_dir || "קבלות (default)" }));
-      if (baseSel) baseSel.value = cat.base_dir || "";
-    }
-    syncFieldsForKind(scope);
-  };
-
-  const combo = makeCombo(root, { items, onChange: apply });
-  // preselect a category whose route matches the heuristic's category guess
-  const guess = s.category
-    ? FB_CATS.find(c => !c.exclude && c.subfolder === s.category) : null;
-  combo.setValue(guess ? guess.id : FB_NEWCAT);
-  apply(root.dataset.value);
+  return FB_CATS;
 }
 
-// Heading + pin/hide for the fields block, driven by the chosen radio and
-// (for "File under a category") whether an existing category or a new one is
-// picked. An existing category owns its route + match rules, so those fields
-// are shown read-only; seller/product stay editable as per-bill overrides.
-function syncFieldsForKind(scope) {
-  const kind = (scope.querySelector("input[name=kind]:checked") || {}).value;
-  const root = $(".f-cat-assign", scope);
-  const catVal = root ? root.dataset.value : "";
-  const fields = $(".fb-fields", scope);
-  const head = $(".fb-fields-head", scope);
-  const isNewCat = kind === "category" && catVal === FB_NEWCAT;
-  const existing = (kind === "category" && catVal && catVal !== FB_NEWCAT)
+function categoriesChanged() { FB_CATS = null; DESTS = null; }
+
+// Shows/hides/pins the fields block for the chosen option:
+//   new category  → everything editable (name, destination, seller/product with
+//                   tick + extract, match rule)
+//   existing      → destination pinned to the category; seller/product show what
+//                   THIS mail resolves to (editable one-off); its rules listed
+//                   read-only + one new rule row that gets added
+//   move once     → destination + plain seller/product, no rule
+//   exclude       → the match rule only
+//   skip          → nothing
+function syncFieldsForKind(form) {
+  const st = form._fb;
+  const kind = (form.querySelector("input[name=kind]:checked") || {}).value;
+  const catVal = $(".f-cat-assign", form).dataset.value;
+  const existing = kind === "category" && catVal && catVal !== FB_NEWCAT
     ? (FB_CATS || []).find(c => c.id === catVal) : null;
+  const isNew = kind === "category" && !existing;
+  const fields = $(".fb-fields", form), head = $(".fb-fields-head", form);
+  const show = (sel, on) => { const el = $(sel, form); if (el) el.hidden = !on; };
 
-  if (fields) fields.hidden = (kind === "exclude" || kind === "skip");
-  if (fields && fields.hidden) return;
+  $(".f-cat-name", form).hidden = !isNew;
+  fields.hidden = kind === "skip";
+  if (fields.hidden) return;
 
-  if (head) {
-    head.textContent =
-      isNewCat        ? "New category — the fields below define it"
-    : existing        ? `Category: ${existing.name} — its route is fixed below`
-    : kind === "once" ? "This receipt only — no rule saved"
+  head.textContent =
+      isNew             ? "New category — the fields below define it"
+    : existing          ? `Category: ${existing.name} — files to its folder`
+    : kind === "once"   ? "This receipt only — nothing is remembered"
+    : kind === "exclude"? "Exclude emails matching this rule"
     : "";
-    head.hidden = !head.textContent;
-  }
+  head.hidden = !head.textContent;
 
-  const dis = (sel, off) => { const el = $(sel, scope); if (el) el.disabled = off; };
-  const hide = (sel, hid) => {
-    const el = $(sel, scope);
-    const field = el && el.closest(".field");
-    if (field) field.hidden = hid;
-  };
-  dis(".f-seller", false);
-  dis(".f-product", false);
-  dis(".f-category", !!existing);
-  dis(".f-basedir", !!existing);
-  dis(".f-sender", !!existing);
-  dis(".f-subject", !!existing);
-  hide(".f-sender", kind === "once");
-  hide(".f-subject", kind === "once");
+  show(".fd-dest", kind !== "exclude");
+  show(".fd-seller", kind !== "exclude");
+  show(".fd-product", kind !== "exclude");
+  show(".fd-match", kind === "category" || kind === "exclude");
+
+  if (st.dest) st.dest.setDisabled(!!existing);
+  st.seller.setSimple(!isNew);
+  st.product.setSimple(!isNew);
+
+  const box = $(".fb-match-existing", form);
+  box.hidden = !existing;
+  box.innerHTML = "";
+  if (existing) {
+    (existing.match || []).forEach(m => {
+      const row = document.createElement("div");
+      row.className = "cat-match";
+      row.textContent = matchText(m);
+      box.appendChild(row);
+    });
+    const note = document.createElement("div");
+    note.className = "hint";
+    note.textContent = "＋ the rule below will be added:";
+    box.appendChild(note);
+  }
 }
 
-function wireForm(scope, it, s) {
-  $(".f-category", scope).value = s.category || "";
-  $(".f-seller", scope).value = s.seller || "";
-  $(".f-product", scope).value = s.product || "";
-  fillBasedirSelect($(".f-basedir", scope), s.base_dir || "");
-  $(".f-sender", scope).value = s.match_sender_contains || "";
+async function wireForm(scope, it, s) {
+  const form = $(".fb-form", scope);
+  const st = form._fb = {};
+  st.seller = makeNameField($(".fd-seller .nf-slot", form), {
+    value: s.seller, preview: (src, rx) => api().preview_extract(it.message_id, src, rx) });
+  st.product = makeNameField($(".fd-product .nf-slot", form), {
+    value: s.product, preview: (src, rx) => api().preview_extract(it.message_id, src, rx) });
+  $(".f-sender", form).value = s.match_sender_contains || "";
   if (s.kind) {
-    const r = scope.querySelector(`.fb-form input[value="${s.kind}"]`);
+    const r = form.querySelector(`input[name=kind][value="${s.kind}"]`);
     if (r) r.checked = true;
   }
-  scope.querySelectorAll("input[name=kind]").forEach(r =>
-    r.addEventListener("change", () => syncFieldsForKind(scope)));
-  fillCatAssign(scope, s);
-  syncFieldsForKind(scope);
-  $(".fb-form", scope).addEventListener("submit", async e => {
+  st.dest = await makeDestPicker($(".f-dest", form), s.destination);
+
+  // "File under a category" picker
+  const cats = await loadCats();
+  const items = [{ value: FB_NEWCAT, label: "＋ New category…" }];
+  cats.filter(c => !c.exclude).forEach(c =>
+    items.push({ value: c.id, label: `${c.name} — ${destLabel(c.destination) || "קבלות"}`,
+                 title: c.destination || "" }));
+  const onCat = async val => {
+    const cat = val === FB_NEWCAT ? null : cats.find(c => c.id === val);
+    if (cat) {
+      if (cat.destination) st.dest.set(cat.destination);
+      let pv = null;
+      try { pv = await api().preview_category(it.message_id, cat.id); } catch (_) {}
+      if (pv && pv.ok) {
+        st.dest.set(pv.destination);
+        st.seller.setValue(pv.seller);
+        st.product.setValue(pv.product);
+      }
+    } else {
+      st.seller.load(undefined, s.seller);
+      st.product.load(undefined, s.product);
+      st.dest.set(s.destination);
+    }
+    syncFieldsForKind(form);
+  };
+  const catCombo = makeCombo($(".f-cat-assign", form), { items, onChange: onCat });
+  const known = s.category_id && cats.find(c => c.id === s.category_id && !c.exclude);
+  catCombo.setValue(known ? known.id : FB_NEWCAT);
+  if (known) await onCat(known.id);
+
+  form.querySelectorAll("input[name=kind]").forEach(r =>
+    r.addEventListener("change", () => syncFieldsForKind(form)));
+  syncFieldsForKind(form);
+
+  form.addEventListener("submit", async e => {
     e.preventDefault();
-    const form = e.currentTarget;
-    const kind = $("input[name=kind]:checked", form).value;
-    const seller  = $(".f-seller", form).value.trim();
-    const product = $(".f-product", form).value.trim();
-    const subfolder = $(".f-category", form).value || null;
-    const base_dir = (v => v && v !== FB_BROWSE ? v : null)($(".f-basedir", form).value.trim());
-    const decision = {
-      kind, seller, product,
-      category: subfolder, base_dir,
-      match_sender_contains: $(".f-sender", form).value.trim(),
-      match_subject_contains: $(".f-subject", form).value.trim() || null,
-    };
+    let kind = $("input[name=kind]:checked", form).value;
+    const decision = { kind };
+    if (kind === "category" || kind === "exclude") decision.match = readMatch(form);
     if (kind === "category") {
       const pick = $(".f-cat-assign", form).dataset.value;
       if (pick === FB_NEWCAT) {
         decision.kind = "new_category";
         decision.category_name = $(".f-cat-name", form).value.trim();
         if (!decision.category_name) { toast("Name the new category first", true); return; }
+        decision.seller = st.seller.field();
+        decision.product = st.product.field();
+        decision.destination = st.dest.value;
       } else {
         decision.category_id = pick;
+        decision.seller = { value: st.seller.value };
+        decision.product = { value: st.product.value };
       }
+    } else if (kind === "once") {
+      decision.destination = st.dest.value;
+      decision.seller = { value: st.seller.value };
+      decision.product = { value: st.product.value };
     }
-    const res = await api().apply_fallback(it.message_id, decision);
+    if (decision.match && !decision.match.sender_contains && !decision.match.subject_contains) {
+      toast("The match rule needs a sender or subject condition", true); return;
+    }
+    if ((decision.kind === "new_category" || kind === "once")
+        && (!decision.destination || decision.destination === DEST_BROWSE)) {
+      toast("Pick a destination folder first", true); return;
+    }
+    const btn = $(".fb-apply", form);
+    btn.disabled = true;
+    let res;
+    try { res = await api().apply_fallback(it.message_id, decision); }
+    catch (err) { res = { ok: false, error: String(err) }; }
+    btn.disabled = false;
     if (res && res.ok) {
       form.closest(".card").remove();
-      toast(`Resolved: ${seller || it.subject}`);
-      FB_CATS = null;                 // a category may have been created/changed
+      toast(kind === "skip" ? "Removed from the list" : `Resolved: ${st.seller.value || it.subject}`);
+      if (kind !== "skip" && kind !== "once") categoriesChanged();
       loadFallbacks();
       refreshHistory();
     } else {
@@ -1133,10 +1285,15 @@ async function showVersion() {
 
 // ---- Categories view -------------------------------------------------
 let catRows = [];
+let RECEIPTS_ROOT = null;   // the קבלות root — where a category without a destination files
 
 async function catLoad() {
   try { catRows = await api().list_categories(); }
   catch (_) { catRows = []; }
+  await loadDests();
+  if (!RECEIPTS_ROOT) {
+    try { RECEIPTS_ROOT = ((await api().list_roots())[0] || {}).path || null; } catch (_) {}
+  }
   catRender();
 }
 
@@ -1147,91 +1304,120 @@ function catRender() {
   for (const c of catRows) list.appendChild(catRowEl(c));
 }
 
+function catAfterWrite(res, okMsg, rerender = true) {
+  toast(res.ok ? okMsg : (res.error || "Failed"), !res.ok);
+  if (!res.ok) return false;
+  catRows = res.categories;
+  categoriesChanged();
+  if (rerender) loadDests().then(catRender);
+  return true;
+}
+
+// "<folder> · seller: <x> · product: <y>" — each value in its own <bdi> so
+// Hebrew values don't reorder the English labels around them.
+function catSummary(el, cat) {
+  el.textContent = "";
+  if (cat.exclude) { el.textContent = "excluded — matching mail is skipped"; return; }
+  const parts = [["", destLabel(cat.destination || RECEIPTS_ROOT) || "קבלות"],
+                 ["seller: ", specSummary(cat.seller)],
+                 ["product: ", specSummary(cat.product)]];
+  parts.forEach(([lbl, val], i) => {
+    if (i) el.append("  ·  ");
+    el.append(lbl);
+    const b = document.createElement("bdi");
+    b.textContent = val;
+    el.appendChild(b);
+  });
+  el.title = el.textContent;
+}
+
 function catRowEl(cat) {
   const n = $("#tpl-cat").content.cloneNode(true);
   const art = n.querySelector(".cat");
   art.dataset.id = cat.id;
   if (cat.exclude) art.classList.add("is-exclude");
-  const nameEl = $(".cat-name", art), sellerEl = $(".cat-seller", art),
-        prodEl = $(".cat-product", art), subEl = $(".cat-subfolder", art);
+  const nameEl = $(".cat-name", art);
   nameEl.value = cat.name || "";
-  sellerEl.value = cat.seller || "";
-  prodEl.value = cat.product || "";
-  subEl.value = cat.subfolder || "";
+  catSummary($(".cat-summary", art), cat);
   const matches = cat.match || [];
-  $(".cat-count", art).textContent = matches.length + (matches.length === 1 ? " sender" : " senders");
-  if (cat.exclude) { sellerEl.hidden = prodEl.hidden = subEl.hidden = true; }
+  $(".cat-count", art).textContent = matches.length + (matches.length === 1 ? " rule" : " rules");
 
   const merge = $(".cat-merge", art);
   merge.innerHTML = `<option value="">merge into…</option>` +
-    catRows.filter(o => o.id !== cat.id && !o.exclude)
+    catRows.filter(o => o.id !== cat.id && !!o.exclude === !!cat.exclude)
            .map(o => `<option value="${o.id}">${o.name}</option>`).join("");
   merge.addEventListener("change", async () => {
     if (!merge.value) return;
     const into = catRows.find(o => o.id === merge.value);
-    if (!confirm(`Move all ${matches.length} sender(s) from “${cat.name}” into “${into.name}” and delete “${cat.name}”?`)) {
+    if (!confirm(`Move all ${matches.length} rule(s) from “${cat.name}” into “${into.name}” and delete “${cat.name}”?\n\nThose emails will then be filed and named the way “${into.name}” says.`)) {
       merge.value = ""; return;
     }
-    const res = await api().category_merge(cat.id, merge.value);
-    toast(res.ok ? `Merged into ${into.name}` : (res.error || "Merge failed"), !res.ok);
-    if (res.ok) { catRows = res.categories; catRender(); FB_CATS = null; }
+    catAfterWrite(await api().category_merge(cat.id, merge.value), `Merged into ${into.name}`);
+  });
+
+  // editor (built lazily on first expand)
+  const editor = $(".cat-editor", art), caret = $(".cat-expand", art);
+  let ed = null;
+  async function build() {
+    if (cat.exclude) {
+      $(".cat-fields", editor).hidden = true;
+    } else {
+      ed = {
+        dest: await makeDestPicker($(".f-dest", editor), cat.destination || RECEIPTS_ROOT),
+        seller: makeNameField($(".fd-seller .nf-slot", editor), { spec: cat.seller ?? null }),
+        product: makeNameField($(".fd-product .nf-slot", editor), { spec: cat.product ?? null }),
+      };
+    }
+    const box = $(".cat-matches", editor);
+    box.innerHTML = "";
+    matches.forEach((m, i) => {
+      const row = document.createElement("div");
+      row.className = "cat-match";
+      const span = document.createElement("span");
+      span.textContent = matchText(m);
+      const del = document.createElement("button");
+      del.className = "cat-match-del"; del.textContent = "✕"; del.title = "Remove this rule";
+      del.addEventListener("click", async () =>
+        catAfterWrite(await api().category_remove_match(cat.id, i), "Rule removed"));
+      row.append(span, del);
+      box.appendChild(row);
+    });
+    $(".cat-add-match-btn", editor).addEventListener("click", async () => {
+      const m = readMatch(editor);
+      if (!m.sender_contains && !m.subject_contains) {
+        toast("A rule needs a sender or subject condition", true); return;
+      }
+      catAfterWrite(await api().category_add_match(cat.id, m), "Rule added");
+    });
+  }
+  caret.addEventListener("click", async () => {
+    editor.hidden = !editor.hidden;
+    caret.textContent = editor.hidden ? "▸" : "▾";
+    if (!editor.hidden && !editor._built) { editor._built = true; await build(); }
   });
 
   $(".cat-save", art).addEventListener("click", async () => {
-    const res = await api().category_update(cat.id, {
-      name: nameEl.value.trim(), seller: sellerEl.value.trim(),
-      product: prodEl.value.trim(), subfolder: subEl.value.trim(),
-    });
-    toast(res.ok ? "Saved" : (res.error || "Save failed"), !res.ok);
-    if (res.ok) { catRows = res.categories; FB_CATS = null; }
+    const patch = { name: nameEl.value.trim() };
+    if (ed) {
+      const dest = ed.dest.value;
+      patch.destination = dest && dest !== DEST_BROWSE ? dest : cat.destination;
+      patch.seller = ed.seller.spec();
+      patch.product = ed.product.spec();
+    }
+    catAfterWrite(await api().category_update(cat.id, patch), "Saved");
   });
 
   $(".cat-del", art).addEventListener("click", async () => {
-    if (!confirm(`Delete category “${cat.name}”? Its ${matches.length} sender(s) will no longer auto-file.`)) return;
-    const res = await api().category_delete(cat.id);
-    toast(res.ok ? "Deleted" : (res.error || "Delete failed"), !res.ok);
-    if (res.ok) { catRows = res.categories; catRender(); FB_CATS = null; }
-  });
-
-  const box = $(".cat-matches", art), caret = $(".cat-expand", art);
-  caret.addEventListener("click", () => {
-    box.hidden = !box.hidden;
-    caret.textContent = box.hidden ? "▸" : "▾";
-    if (!box.hidden) catFillMatches(box, cat);
+    if (!confirm(`Delete category “${cat.name}”? Its ${matches.length} rule(s) will no longer auto-file.`)) return;
+    catAfterWrite(await api().category_delete(cat.id), "Deleted");
   });
   return n;
-}
-
-function catFillMatches(box, cat) {
-  box.innerHTML = "";
-  (cat.match || []).forEach((m, i) => {
-    const row = document.createElement("div");
-    row.className = "cat-match";
-    const bits = [m.sender_contains && `from ${m.sender_contains}`,
-                  m.subject_contains && `subject ~ “${m.subject_contains}”`,
-                  m.exclude_subject_contains && `not subject ~ “${m.exclude_subject_contains}”`,
-                  m.body_contains && `body ~ “${m.body_contains}”`,
-                  m.seller && `seller → ${m.seller}`,
-                  m.product && `product → ${m.product}`].filter(Boolean);
-    const span = document.createElement("span");
-    span.textContent = bits.join("  ·  ") || "(empty match)";
-    const del = document.createElement("button");
-    del.className = "cat-match-del"; del.textContent = "✕"; del.title = "Remove this sender";
-    del.addEventListener("click", async () => {
-      const res = await api().category_remove_match(cat.id, i);
-      toast(res.ok ? "Removed" : (res.error || "Failed"), !res.ok);
-      if (res.ok) { catRows = res.categories; catRender(); FB_CATS = null; }
-    });
-    row.append(span, del);
-    box.appendChild(row);
-  });
 }
 
 $("#cat-new-btn").addEventListener("click", async () => {
   const inp = $("#cat-new-name");
   const name = inp.value.trim();
   if (!name) { toast("Name the category first", true); return; }
-  const res = await api().category_add(name, {});
-  toast(res.ok ? `Added ${name}` : (res.error || "Add failed"), !res.ok);
-  if (res.ok) { inp.value = ""; catRows = res.categories; catRender(); FB_CATS = null; }
+  const res = await api().category_add(name, { destination: RECEIPTS_ROOT });
+  if (catAfterWrite(res, `Added ${name} — expand it to set its folder, names and rules`)) inp.value = "";
 });

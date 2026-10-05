@@ -102,7 +102,7 @@ class TestExplorerApi(unittest.TestCase):
         a = appmod.Api(scan_fn=lambda run_id, progress_cb: {
             "run_id": run_id, "saved": 0, "fallback": 0, "excluded": 0, "records": []})
         self._orig = receipt_roots.discover_roots
-        receipt_roots.discover_roots = lambda rules_path=None: self._roots
+        receipt_roots.discover_roots = lambda categories_path=None: self._roots
         self.addCleanup(setattr, receipt_roots, "discover_roots", self._orig)
         return a
 
@@ -250,45 +250,66 @@ class TestCategoryApi(unittest.TestCase):
         import categories as C
         self.tmp = Path(tempfile.mkdtemp())
         self.f = self.tmp / "categories.json"
+        self.elec = str(self.tmp / "קבלות" / "חשבנות" / "חשמל")
         self.f.write_text(json.dumps([
-            {"id": "elec", "name": "חשמל", "seller": "אלקטרה", "product": "חשבונית חשמל",
-             "base_dir": None, "subfolder": "חשבנות/חשמל",
+            {"id": "elec", "name": "חשמל", "destination": self.elec, "exclude": False,
+             "seller": {"mode": "fixed", "value": "אלקטרה"},
+             "product": {"mode": "extract", "source": "subject", "regex": r"חשבון (\S+)"},
              "match": [{"sender_contains": "iec.co.il"}]},
-            {"id": "gas", "name": "גז", "seller": "פזגז", "product": "חשבונית גז",
-             "base_dir": None, "subfolder": "חשבנות/גז",
+            {"id": "gas", "name": "גז", "destination": str(self.tmp / "גז"), "exclude": False,
+             "seller": {"mode": "fixed", "value": "פזגז"},
+             "product": {"mode": "extract", "source": "body", "regex": r"לקוח (\d+)"},
              "match": [{"sender_contains": "pazgas.co.il"}]},
+            {"id": "excluded", "name": "(excluded)", "destination": None, "exclude": True,
+             "seller": None, "product": None, "match": [{"sender_contains": "ads.com"}]},
         ], ensure_ascii=False), encoding="utf-8")
         self._orig = C.CATEGORIES_FILE
         C.CATEGORIES_FILE = self.f
         self.addCleanup(setattr, C, "CATEGORIES_FILE", self._orig)
+        self.flog = self.tmp / "fallback_log.json"
+        self.flog.write_text(json.dumps([
+            {"message_id": "m1", "account": "ofek", "sender": '"IEC" <bill@iec.co.il>',
+             "subject": "חשבון 03/2026", "date": "2026_08_25", "folder_name": "f",
+             "folder_path": str(self.tmp / "f"), "resolved": False},
+        ], ensure_ascii=False), encoding="utf-8")
 
     def _api(self):
-        return appmod.Api(scan_fn=lambda run_id, progress_cb: None)
+        return appmod.Api(scan_fn=lambda run_id, progress_cb: None,
+                          fallback_log_path=self.flog)
 
     def _read(self):
         return json.loads(self.f.read_text(encoding="utf-8"))
 
     def test_list(self):
-        self.assertEqual([c["id"] for c in self._api().list_categories()], ["elec", "gas"])
+        self.assertEqual([c["id"] for c in self._api().list_categories()],
+                         ["elec", "gas", "excluded"])
 
     def test_add_update_delete(self):
         api = self._api()
-        self.assertTrue(api.category_add("מים", {"seller": "מי ראשון",
-                                                 "subfolder": "חשבנות/מים"})["ok"])
-        self.assertIn("מים", [c["name"] for c in self._read()])
+        res = api.category_add("מים", {"destination": str(self.tmp / "מים"),
+                                       "seller": {"mode": "fixed", "value": "מי ראשון"}})
+        self.assertTrue(res["ok"])
         cid = next(c["id"] for c in self._read() if c["name"] == "מים")
-        self.assertTrue(api.category_update(cid, {"seller": "תאגיד מים"})["ok"])
-        self.assertEqual(next(c for c in self._read() if c["id"] == cid)["seller"],
-                         "תאגיד מים")
+        self.assertEqual(next(c for c in self._read() if c["id"] == cid)["destination"],
+                         str(self.tmp / "מים"))
+        self.assertTrue(api.category_update(cid, {"seller": None})["ok"])
+        self.assertIsNone(next(c for c in self._read() if c["id"] == cid)["seller"])
         self.assertTrue(api.category_delete(cid)["ok"])
         self.assertNotIn(cid, [c["id"] for c in self._read()])
 
+    def test_update_with_bad_regex_reports_error_and_writes_nothing(self):
+        before = self._read()
+        res = self._api().category_update("elec", {"product": {
+            "mode": "extract", "source": "subject", "regex": "("}})
+        self.assertFalse(res["ok"])
+        self.assertIn("regex", res["error"])
+        self.assertEqual(self._read(), before)
+
     def test_merge(self):
         self.assertTrue(self._api().category_merge("gas", "elec")["ok"])
-        ids = [c["id"] for c in self._read()]
-        self.assertEqual(ids, ["elec"])
-        senders = [m["sender_contains"] for m in self._read()[0]["match"]]
-        self.assertEqual(senders, ["iec.co.il", "pazgas.co.il"])
+        self.assertEqual([c["id"] for c in self._read()], ["elec", "excluded"])
+        self.assertEqual([m["sender_contains"] for m in self._read()[0]["match"]],
+                         ["iec.co.il", "pazgas.co.il"])
 
     def test_add_and_remove_match(self):
         api = self._api()
@@ -302,7 +323,74 @@ class TestCategoryApi(unittest.TestCase):
         api = self._api()
         self.assertFalse(api.category_delete("ghost")["ok"])
         self.assertFalse(api.category_merge("elec", "elec")["ok"])
-        self.assertFalse(api.category_update("ghost", {"seller": "x"})["ok"])
+        self.assertFalse(api.category_update("ghost", {"name": "x"})["ok"])
+
+    # -- previews ---------------------------------------------------------
+    def test_preview_extract_on_subject_needs_no_network(self):
+        api = self._api()
+        with mock.patch.object(api, "_fetch_text", side_effect=AssertionError("no fetch")):
+            res = api.preview_extract("m1", "subject", r"חשבון (\S+)")
+        self.assertEqual(res, {"ok": True, "value": "03_2026"})
+
+    def test_preview_extract_sender_name_and_miss(self):
+        api = self._api()
+        self.assertEqual(api.preview_extract("m1", "sender_name", r"(.+)")["value"], "IEC")
+        self.assertEqual(api.preview_extract("m1", "subject", r"xyz(\d)"),
+                         {"ok": True, "value": None})
+
+    def test_preview_extract_bad_regex(self):
+        res = self._api().preview_extract("m1", "subject", "(")
+        self.assertFalse(res["ok"])
+        self.assertIn("regex", res["error"])
+
+    def test_preview_extract_body_fetches_once_and_caches(self):
+        api = self._api()
+        with mock.patch.object(api, "_fetch_text",
+                               return_value={"body": "מספר לקוח 4711 תודה"}) as f:
+            self.assertEqual(api.preview_extract("m1", "body", r"לקוח (\d+)")["value"], "4711")
+            api.preview_extract("m1", "body", r"(\d+)")
+        self.assertEqual(f.call_count, 1)
+
+    def test_preview_extract_body_fetch_failure_is_reported(self):
+        api = self._api()
+        with mock.patch.object(api, "_fetch_text", side_effect=RuntimeError("offline")):
+            res = api.preview_extract("m1", "body", r"(\d+)")
+        self.assertFalse(res["ok"])
+        self.assertIn("offline", res["error"])
+
+    def test_preview_category_resolves_names_for_this_mail(self):
+        res = self._api().preview_category("m1", "elec")
+        self.assertEqual(res, {"ok": True, "seller": "אלקטרה", "product": "03_2026",
+                               "destination": self.elec})
+
+    def test_preview_category_with_body_spec_degrades_when_offline(self):
+        api = self._api()
+        with mock.patch.object(api, "_fetch_text", side_effect=RuntimeError("offline")):
+            res = api.preview_category("m1", "gas")
+        self.assertTrue(res["ok"])
+        self.assertEqual(res["seller"], "פזגז")
+        self.assertTrue(res["product"])                    # app suggestion
+
+    def test_destination_suggestions_ranked_by_use(self):
+        import receipt_roots
+        hist = self.tmp / "history.json"
+        hist.write_text(json.dumps([
+            {"id": "a", "action": "DOWNLOADED", "folder_path": self.elec + r"\2026 - a"},
+            {"id": "b", "action": "RESOLVED", "folder_path": self.elec + r"\2026 - b"},
+            {"id": "c", "action": "FALLBACK", "folder_path": str(self.tmp / "manual" / "x")},
+        ], ensure_ascii=False), encoding="utf-8")
+        roots = [{"label": "קבלות", "path": str(self.tmp / "קבלות")},
+                 {"label": "לטיפול ידני", "path": str(self.tmp / "manual")}]
+        with mock.patch.object(history_mod, "HISTORY_FILE", hist), \
+             mock.patch.object(receipt_roots, "discover_roots", lambda *a, **k: roots), \
+             mock.patch.object(receipt_roots, "MANUAL_DIR", Path(roots[1]["path"])):
+            out = self._api().destination_suggestions()
+        paths = [d["path"] for d in out]
+        self.assertEqual(paths[0], self.elec)                  # 1 category + 2 history
+        self.assertEqual(out[0]["label"], "קבלות › חשבנות › חשמל")
+        self.assertIn(str(self.tmp / "קבלות"), paths)          # roots always offered
+        self.assertNotIn(str(self.tmp / "manual"), paths)      # never the fallback dir
+        self.assertFalse(any(p.startswith(str(self.tmp / "manual")) for p in paths))
 
 
 class TestPickFolder(unittest.TestCase):
@@ -360,7 +448,7 @@ class TestSearchReceipts(unittest.TestCase):
         self._roots = [{"label": "קבלות", "path": str(self.r1)},
                        {"label": "נכסים", "path": str(self.r2)}]
         self._orig = receipt_roots.discover_roots
-        receipt_roots.discover_roots = lambda rules_path=None: self._roots
+        receipt_roots.discover_roots = lambda categories_path=None: self._roots
         self.addCleanup(setattr, receipt_roots, "discover_roots", self._orig)
 
     def _api(self):

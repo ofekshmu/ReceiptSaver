@@ -102,6 +102,7 @@ class Api:
         self._lock = threading.Lock()
         self._thread = None
         self._run = {"status": "idle", "events": [], "summary": None}
+        self._body_cache = {}       # message_id -> fetched body text (per session)
 
     # -- wiring ------------------------------------------------------------
     def bind(self, window):
@@ -226,9 +227,6 @@ class Api:
     def open_path(self, path: str) -> dict:
         return self.open_folder(path)
 
-    def categories(self) -> list:
-        return fallback_ops.CATEGORIES
-
     # -- bill categories (categories.json) ------------------------------
     def _cat_write(self, mutate) -> dict:
         """load -> mutate(cats) -> (save if truthy) -> return {ok, categories}."""
@@ -250,8 +248,8 @@ class Api:
     def category_add(self, name: str, config: dict = None) -> dict:
         cfg = config or {}
         return self._cat_write(lambda C, cats: cats.append(
-            C.new_category(name, seller=cfg.get("seller"), product=cfg.get("product"),
-                           base_dir=cfg.get("base_dir"), subfolder=cfg.get("subfolder"),
+            C.new_category(name, destination=cfg.get("destination"),
+                           seller=cfg.get("seller"), product=cfg.get("product"),
                            exclude=cfg.get("exclude", False), categories=cats)) or True)
 
     def category_update(self, category_id: str, patch: dict) -> dict:
@@ -268,6 +266,100 @@ class Api:
 
     def category_add_match(self, category_id: str, entry: dict) -> dict:
         return self._cat_write(lambda C, cats: C.add_match(cats, category_id, entry or {}))
+
+    # -- fallback form helpers -------------------------------------------
+    def _fetch_text(self, entry: dict) -> dict:
+        """Fetch one mail from its mailbox (network) — {"body": str}."""
+        acct = next((a for a in receipt_saver.ACCOUNTS
+                     if a["label"] == entry.get("account")), None)
+        if acct is None:
+            raise RuntimeError(f'unknown account {entry.get("account")!r}')
+        provider = receipt_saver.PROVIDERS[acct["provider"]]
+        service = provider.get_service(acct)
+        msg = provider.fetch_message(service, entry["message_id"], acct)
+        return {"body": msg.get("body_text") or ""}
+
+    def _body(self, entry: dict) -> str:
+        mid = entry["message_id"]
+        if mid not in self._body_cache:
+            self._body_cache[mid] = self._fetch_text(entry).get("body") or ""
+        return self._body_cache[mid]
+
+    def preview_extract(self, message_id: str, source: str, regex: str) -> dict:
+        """Run an extraction rule against one fallback mail, exactly as the scan
+        engine would (Python `re`). value is None on a miss."""
+        import categories as C
+        entry = self._fallback_by_id(message_id)
+        if not entry:
+            return {"ok": False, "error": "entry not found"}
+        try:
+            body = self._body(entry) if source == "body" else ""
+        except Exception as e:
+            return {"ok": False, "error": f"couldn't fetch the mail body: {e}"}
+        try:
+            value = C.extract(source, regex or "", entry.get("sender", ""),
+                              entry.get("subject", ""), body)
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
+        return {"ok": True, "value": value}
+
+    def preview_category(self, message_id: str, category_id: str) -> dict:
+        """What an existing category would name and file this mail as."""
+        import categories as C
+        entry = self._fallback_by_id(message_id)
+        cat = C.find(C.load_categories(), category_id)
+        if not entry or not cat:
+            return {"ok": False, "error": "entry or category not found"}
+        body = ""
+        if C.needs_body(cat):
+            try:
+                body = self._body(entry)
+            except Exception:
+                body = ""                     # offline: fall back to the suggestion
+        seller, product = C.resolve_names(cat, entry.get("sender", ""),
+                                          entry.get("subject", ""), body)
+        return {"ok": True, "seller": seller, "product": product,
+                "destination": str(C.destination_of(cat))}
+
+    def destination_suggestions(self) -> list:
+        """Destinations for the picker, most used first: category destinations +
+        the folders History filed into + every root (never the fallback dir)."""
+        import categories as C
+        manual = receipt_roots.MANUAL_DIR
+        roots = [r for r in receipt_roots.discover_roots()
+                 if not receipt_roots._inside(r["path"], manual)]
+        counts = {}
+
+        def bump(path, n=1):
+            if not path or receipt_roots._inside(path, manual):
+                return
+            key = receipt_roots._norm(path)
+            counts.setdefault(key, [str(path), 0])[1] += n
+
+        for cat in C.load_categories():
+            if not cat.get("exclude"):
+                bump(cat.get("destination"))
+        for row in history.load():
+            if row.get("action") != "FALLBACK" and row.get("folder_path"):
+                bump(os.path.dirname(row["folder_path"]))
+        for r in roots:
+            bump(r["path"], 0)
+
+        def label(path):
+            best = None
+            for r in roots:
+                if receipt_roots._inside(path, r["path"]) and (
+                        best is None or len(r["path"]) > len(best["path"])):
+                    best = r
+            if best is None:
+                return " › ".join(Path(path).parts[-3:])
+            rel = os.path.relpath(path, best["path"])
+            parts = [] if rel == "." else Path(rel).parts
+            return " › ".join([best["label"], *parts])
+
+        out = [{"path": p, "label": label(p), "count": n} for p, n in counts.values()]
+        out.sort(key=lambda d: (-d["count"], d["label"].lower()))
+        return out
 
     # -- ui state ---------------------------------------------------------
     def get_ui_state(self) -> dict:
@@ -440,7 +532,7 @@ class Api:
 
     def pick_folder(self) -> dict:
         """Open the OS folder picker and return the chosen directory. Used by
-        the fallback form's "Destination root" dropdown to add a new route.
+        the Destination pickers (Fallbacks form, Categories tab).
         `path` is None when the user cancels (or there's no window yet)."""
         if not self._window:
             return {"ok": True, "path": None}

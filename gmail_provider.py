@@ -2,8 +2,8 @@
 gmail_provider.py
 ------------------
 Gmail-specific implementation of the provider interface consumed by
-receipt_saver.py: get_service(account), list_candidate_ids(service, account,
-custom_rules_file), fetch_message(service, msg_id, account).
+receipt_saver.py: get_service(account), list_candidate_ids(service, account),
+fetch_message(service, msg_id, account).
 
 Extracted from receipt_saver.py with no behavior change.
 """
@@ -26,27 +26,21 @@ GMAIL_SUBJECT_KEYWORDS = (
 )
 
 
-def _rules_for_query(custom_rules_file: Path) -> list:
-    """Legacy custom_rules.json if present, else categories.json flattened."""
-    try:
-        data = json.loads(Path(custom_rules_file).read_text(encoding="utf-8"))
-        if isinstance(data, list) and data:
-            return data
-    except Exception:
-        pass
+def _query_terms() -> list:
+    """`{sender_contains, exclude_subject_contains}` per category match entry."""
     try:
         import categories
-        return categories.to_legacy_rules()
+        return categories.query_terms()
     except Exception:
         return []
 
 
-def build_gmail_query(custom_rules_file: Path) -> str:
-    """Build Gmail search query, adding from: exceptions for domain-based custom rules."""
+def build_gmail_query() -> str:
+    """Build Gmail search query, adding from: exceptions for domain-based category senders."""
     base = f'-in:sent -subject:פרסומת newer_than:60d ((has:attachment AND ({GMAIL_SUBJECT_KEYWORDS}))'
-    for rule in _rules_for_query(custom_rules_file):
-        sender  = rule.get("match_sender_contains", "") or ""
-        exclude = rule.get("exclude_subject_contains", "") or ""
+    for term in _query_terms():
+        sender  = term["sender_contains"]
+        exclude = term["exclude_subject_contains"]
         if "." in sender:  # domain-based match (e.g. icmega.org)
             clause = f"from:{sender}"
             if exclude:
@@ -73,8 +67,8 @@ def get_service(account: dict):
     return build("gmail", "v1", credentials=creds)
 
 
-def list_candidate_ids(service, account: dict, custom_rules_file: Path) -> list:
-    query = build_gmail_query(custom_rules_file)
+def list_candidate_ids(service, account: dict) -> list:
+    query = build_gmail_query()
     results = service.users().messages().list(
         userId="me", q=query, maxResults=300
     ).execute()

@@ -2,8 +2,8 @@
 outlook_provider.py
 --------------------
 Microsoft Graph implementation of the provider interface consumed by
-receipt_saver.py: get_service(account), list_candidate_ids(service, account,
-custom_rules_file), fetch_message(service, msg_id, account).
+receipt_saver.py: get_service(account), list_candidate_ids(service, account),
+fetch_message(service, msg_id, account).
 
 Auth is MSAL device-code flow against an Azure AD app registration
 (public client, no secret) — see docs/superpowers/specs/2026-07-15-outlook-account-design.md
@@ -86,26 +86,19 @@ def get_service(account: dict, interactive: bool = False) -> dict:
     return {"access_token": result["access_token"]}
 
 
-def _rules_for_query(custom_rules_file: Path) -> list:
-    """Legacy custom_rules.json if present, else categories.json flattened."""
-    try:
-        data = json.loads(Path(custom_rules_file).read_text(encoding="utf-8"))
-        if isinstance(data, list) and data:
-            return data
-    except Exception:
-        pass
+def _query_terms() -> list:
+    """`{sender_contains, exclude_subject_contains}` per category match entry."""
     try:
         import categories
-        return categories.to_legacy_rules()
+        return categories.query_terms()
     except Exception:
         return []
 
 
-def _custom_rule_domains(custom_rules_file: Path) -> list:
-    rules = _rules_for_query(custom_rules_file)
+def _custom_rule_domains() -> list:
     domains = []
-    for rule in rules:
-        sender = rule.get("match_sender_contains", "") or ""
+    for term in _query_terms():
+        sender = term["sender_contains"]
         if "." in sender:
             domains.append(sender.lower())
     return domains
@@ -122,7 +115,7 @@ def _is_relevant(sender: str, subject: str, has_attachment: bool, domains: list)
     return False
 
 
-def list_candidate_ids(service, account: dict, custom_rules_file: Path) -> list:
+def list_candidate_ids(service, account: dict) -> list:
     since = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=60)).strftime("%Y-%m-%dT%H:%M:%SZ")
     headers = {"Authorization": f"Bearer {service['access_token']}"}
     url = (
@@ -132,7 +125,7 @@ def list_candidate_ids(service, account: dict, custom_rules_file: Path) -> list:
         f"&$select=id,subject,from,hasAttachments"
         f"&$top=50"
     )
-    domains = _custom_rule_domains(custom_rules_file)
+    domains = _custom_rule_domains()
     ids = []
     while url:
         resp = requests.get(url, headers=headers, timeout=15)

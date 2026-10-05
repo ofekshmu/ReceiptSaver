@@ -1,4 +1,4 @@
-"""
+r"""
 receipt_saver.py
 ----------------
 Runs on Windows startup via Task Scheduler.
@@ -11,7 +11,7 @@ Folder format: YYYY-MM-DD - Seller - Product - [account]
 Decision pipeline per email:
   1. Skip if in SENT folder
   2. Check hardcoded KNOWN_RULES  → save to קבלות\
-  3. Check custom_rules.json      → save to קבלות\
+  3. Check categories.json        → save to the category's destination
   4. Fallback                     → save to קבלות\_לטיפול ידני\
                                     + log to fallback_log.json
                                     + TickTick task
@@ -27,6 +27,8 @@ import json
 import logging
 import datetime
 from pathlib import Path
+
+import categories
 
 import requests
 
@@ -54,7 +56,6 @@ MANUAL_DIR          = RECEIPTS_DIR / "_לטיפול ידני"
 JAPANOLOGIA_DIR     = Path(r"C:\Users\ofeks\OneDrive\Ofek\Japanese Lessons\Japanologia")
 SCRIPT_DIR          = Path(r"C:\Users\ofeks\Scripts\ReceiptSaver")
 PROCESSED_FILE      = SCRIPT_DIR / "processed_ids.json"
-CUSTOM_RULES_FILE   = SCRIPT_DIR / "custom_rules.json"
 FALLBACK_LOG_FILE   = SCRIPT_DIR / "fallback_log.json"
 LOG_FILE            = SCRIPT_DIR / "receipt_saver.log"
 TICKTICK_TOKEN_FILE = SCRIPT_DIR / "ticktick_token.json"
@@ -340,59 +341,17 @@ def save_email_pdf(body_html: str, folder: Path,
         return None
 
 # ══════════════════════════════════════════════════════════════════════════
-# CUSTOM RULES  (managed via chat with Claude)
+# CATEGORIES  (categories.json — see categories.py)
 # ══════════════════════════════════════════════════════════════════════════
 
-CATEGORIES_FILE     = SCRIPT_DIR / "categories.json"
-LEGACY_RULES_FILE   = SCRIPT_DIR / "custom_rules.legacy.json"
-
-
-def load_custom_rules() -> list:
-    """Sender-matching rules, newest source first:
-      1. categories.json (flattened to the legacy dict shape) — current format
-      2. custom_rules.json / custom_rules.legacy.json — pre-migration fallback
-    `match_custom()` and the providers' query builders iterate whatever this
-    returns; the shape and ordering are identical either way."""
+def _category_label(dest: Path):
+    """History's `category` field: the destination relative to קבלות when it
+    lives under it (e.g. `חשבנות\\חשמל`), else the full path; None for קבלות itself."""
     try:
-        import categories
-        if CATEGORIES_FILE.exists():
-            return categories.to_legacy_rules()
-    except Exception as e:
-        log.warning(f"Could not load categories.json: {e}")
-    for f in (CUSTOM_RULES_FILE, LEGACY_RULES_FILE):
-        if f.exists():
-            try:
-                return json.loads(f.read_text(encoding="utf-8"))
-            except Exception as e:
-                log.warning(f"Could not load {f.name}: {e}")
-    return []
-
-def match_custom(sender: str, subject: str, body: str = ""):
-    # Normalize whitespace: HTML-to-text conversion (e.g. Outlook's Graph API)
-    # can leave non-breaking spaces and irregular line wraps that would
-    # otherwise silently defeat match_body_contains/product_body_regex.
-    body = re.sub(r"[\s\xa0]+", " ", body)
-    for rule in load_custom_rules():
-        sender_frag   = rule.get("match_sender_contains", "")
-        subject_frag  = rule.get("match_subject_contains") or ""
-        exclude_frag  = rule.get("exclude_subject_contains") or ""
-        body_frag     = rule.get("match_body_contains") or ""
-        sender_ok   = sender_frag.lower()  in sender.lower()  if sender_frag  else True
-        subject_ok  = subject_frag.lower() in subject.lower() if subject_frag else True
-        excluded    = exclude_frag.lower() in subject.lower() if exclude_frag else False
-        body_ok     = body_frag in body                        if body_frag   else True
-        if sender_ok and subject_ok and not excluded and body_ok:
-            if rule.get("exclude"):
-                return "__exclude__", None, None, None
-            base_dir = Path(rule["base_dir"]) if rule.get("base_dir") else None
-            product  = rule["product"]
-            body_regex = rule.get("product_body_regex") or ""
-            if body_regex and body:
-                m = re.search(body_regex, body)
-                if m:
-                    product = sanitize(m.group(1).strip())
-            return rule["seller"], product, rule.get("category"), base_dir
-    return None
+        rel = Path(dest).relative_to(RECEIPTS_DIR)
+        return str(rel) if str(rel) != "." else None
+    except ValueError:
+        return str(dest)
 
 # ══════════════════════════════════════════════════════════════════════════
 # FALLBACK LOG
@@ -512,10 +471,10 @@ def process_message(msg: dict, account: dict, run_id: str = "") -> dict:
         m = re.search(r"מאת\s+(.+?)$", subject)
         seller  = sanitize(m.group(1).strip()) if m else "iCount"
         product = "חשבונית מס קבלה"
-        custom_match = match_custom(sender, subject)
-        category = custom_match[2] if custom_match else None
-        root     = custom_match[3] if custom_match and custom_match[3] else RECEIPTS_DIR
-        base_dir = root / category if category else root
+        cat_match = categories.match_category(sender, subject)
+        base_dir  = (cat_match[2] if cat_match and cat_match[0] != categories.EXCLUDE
+                     else RECEIPTS_DIR)
+        category  = _category_label(base_dir)
         folder_name = f"{date_str} - {seller} - {product} - {label}"
         folder, folder_name = unique_folder(base_dir, folder_name)
         folder.mkdir(parents=True, exist_ok=True)
@@ -547,18 +506,17 @@ def process_message(msg: dict, account: dict, run_id: str = "") -> dict:
                            category=category, rule_source="hardcoded")
         return {"status": "saved", "record": rec}
 
-    # ── Step 2: custom rules ───────────────────────────────────────────
+    # ── Step 2: categories ─────────────────────────────────────────────
     body   = msg["body_text"]
-    custom = match_custom(sender, subject, body)
+    custom = categories.match_category(sender, subject, body)
     if custom:
-        seller, product, category, rule_base_dir = custom
-        if seller == "__exclude__":
+        seller, product, base_dir = custom
+        if seller == categories.EXCLUDE:
             log.info(f"EXCLUDED   {sender} — {subject[:60]}")
             rec = _make_record(msg, account, run_id, "EXCLUDED", None, None, [],
                                rule_source="custom")
             return {"status": "excluded", "record": rec}
-        root     = rule_base_dir if rule_base_dir else RECEIPTS_DIR
-        base_dir = root / category if category else root
+        category = _category_label(base_dir)
         folder_name = f"{date_str} - {sanitize(seller)} - {sanitize(product)} - {label}"
         folder, folder_name = unique_folder(base_dir, folder_name)
         folder.mkdir(parents=True, exist_ok=True)
@@ -645,7 +603,7 @@ def main(run_id: str = None, progress_cb=None):
             emit({"type": "error", "label": label, "message": str(e)})
             continue
 
-        candidate_ids = provider.list_candidate_ids(service, account, CUSTOM_RULES_FILE)
+        candidate_ids = provider.list_candidate_ids(service, account)
         log.info(f"  Candidates: {len(candidate_ids)}")
         emit({"type": "account", "label": label, "email": account["email"],
               "candidates": len(candidate_ids)})

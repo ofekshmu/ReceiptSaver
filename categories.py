@@ -1,31 +1,34 @@
 """
 categories.py
 -------------
-A *category* is a named bundle that both **matches** incoming mail and defines
-where matched receipts are filed. It replaces the flat per-sender entries in
-`custom_rules.json` (see `migrate_rules_to_categories.py`).
+A *category* is a complete filing recipe: it **matches** incoming mail and says
+**where** the receipt goes and **how** its seller/product are named.
 
 Shape of one category (`categories.json` is a list of these):
 
     {
-      "id":        "electricity",          # stable slug
-      "name":      "חשמל",                 # display name
-      "seller":    "חברת חשמל לישראל",     # default seller for the folder name
-      "product":   "חשבונית חשמל",         # default product
-      "base_dir":  null,                   # route root; null => קבלות
-      "subfolder": "חשבנות/חשמל",          # folder under the route (old `category` string)
-      "exclude":   false,                  # true => matched mail is dropped, not filed
-      "match": [                           # OR-list; an entry matches if ALL its keys hold
+      "id":          "electricity",            # stable slug
+      "name":        "חשמל",                   # display name
+      "destination": "C:\\...\\קבלות\\חשבנות\\חשמל",   # full folder path; null => קבלות
+      "seller":      {"mode": "fixed", "value": "חברת חשמל לישראל"},
+      "product":     {"mode": "extract", "source": "subject",
+                      "regex": "חשבון לתקופה (.+)", "fallback": "חשבונית חשמל"},
+      "exclude":     false,                    # true => matched mail is dropped
+      "match": [                               # OR-list; an entry matches if ALL its keys hold
         { "sender_contains": "iec.co.il" },
-        { "sender_contains": "electra-power.co.il",
-          "subject_contains": "...", "exclude_subject_contains": "...",
-          "body_contains": "...", "product_body_regex": "..." }
+        { "sender_contains": "x.co.il", "subject_contains": "...",
+          "exclude_subject_contains": "...", "body_contains": "..." }
       ]
     }
 
-`match_category()` is a drop-in for `receipt_saver.match_custom()` — it returns
-the same 4-tuple `(seller, product, subfolder, base_dir)` (or the sentinel
-`("__exclude__", None, None, None)`), or `None` when nothing matches.
+A seller/product *spec* is one of:
+  * ``{"mode": "fixed", "value": str}``
+  * ``{"mode": "extract", "source": "subject"|"body"|"sender_name", "regex": str,
+     "fallback"?: str}`` — first capture group (or the whole match), sanitized
+  * ``null`` — use the app's suggestion (`naming.suggest_names`)
+
+Resolution: fixed value → extraction → extraction fallback → app suggestion.
+First category with a matching `match[]` entry wins.
 """
 
 import json
@@ -34,29 +37,23 @@ import re
 import unicodedata
 from pathlib import Path
 
+import naming
+
 SCRIPT_DIR = Path(__file__).parent
 CATEGORIES_FILE = SCRIPT_DIR / "categories.json"
+RECEIPTS_DIR = Path(r"C:\Users\ofeks\OneDrive\Documents\קבלות")
 
 EXCLUDE = "__exclude__"
+EXCLUDE_CATEGORY_ID = "excluded"
 
-# condition keys on a single `match[]` entry
 MATCH_COND_KEYS = ("sender_contains", "subject_contains", "exclude_subject_contains",
                    "body_contains")
-# a match[] entry may also carry these per-entry OVERRIDES of the category
-# defaults — e.g. same category/route, but this sender+subject uses its own seller
-MATCH_OVERRIDE_KEYS = ("seller", "product", "product_body_regex")
-MATCH_KEYS = MATCH_COND_KEYS + MATCH_OVERRIDE_KEYS
+SOURCES = ("subject", "body", "sender_name")
 
 
-def _sanitize(s: str) -> str:
-    """Folder-safe string. Lazily borrows receipt_saver.sanitize so this module
-    stays import-light (and free of a circular import) when it's only matching."""
-    try:
-        from receipt_saver import sanitize
-        return sanitize(s)
-    except Exception:
-        return re.sub(r'[<>:"/\\|?*\n\r\t]', " ", str(s or "")).strip()
-
+# ---------------------------------------------------------------------------
+# load / save
+# ---------------------------------------------------------------------------
 
 def load_categories(path: Path = None) -> list:
     p = Path(path or CATEGORIES_FILE)
@@ -95,8 +92,102 @@ def slugify(name: str, taken: set = None) -> str:
 
 
 # ---------------------------------------------------------------------------
-# mutation helpers — each takes the in-memory list and returns it (or a bool);
-# callers persist with save_categories().
+# seller / product specs
+# ---------------------------------------------------------------------------
+
+def normalize_body(body: str) -> str:
+    # HTML-to-text conversion (e.g. Outlook's Graph API) can leave non-breaking
+    # spaces and irregular line wraps that would otherwise defeat body matching.
+    return re.sub(r"[\s\xa0]+", " ", body or "")
+
+
+def _source_text(source: str, sender: str, subject: str, body: str) -> str:
+    if source == "subject":
+        return subject or ""
+    if source == "body":
+        return normalize_body(body)
+    if source == "sender_name":
+        return naming.display_name(sender)
+    raise ValueError(f"unknown source {source!r}")
+
+
+def extract(source: str, regex: str, sender: str, subject: str, body: str):
+    """Run `regex` over the chosen part of the mail. Returns the sanitized first
+    capture group (or whole match when the regex has no group), or None on a
+    miss. Raises ValueError on an invalid regex or unknown source."""
+    text = _source_text(source, sender, subject, body)
+    try:
+        rx = re.compile(regex)
+    except re.error as e:
+        raise ValueError(f"invalid regex: {e}") from None
+    hit = rx.search(text)
+    if not hit:
+        return None
+    value = hit.group(1) if rx.groups else hit.group(0)
+    value = naming.sanitize((value or "").strip())
+    return value or None
+
+
+def resolve_spec(spec, sender: str, subject: str, body: str, suggestion: str) -> str:
+    """The value a spec yields for one mail; never raises, never empty."""
+    if spec and spec.get("mode") == "fixed" and (spec.get("value") or "").strip():
+        return spec["value"].strip()
+    if spec and spec.get("mode") == "extract":
+        try:
+            hit = extract(spec.get("source"), spec.get("regex") or "", sender, subject, body)
+        except ValueError:
+            hit = None
+        if hit:
+            return hit
+        if (spec.get("fallback") or "").strip():
+            return spec["fallback"].strip()
+    return suggestion
+
+
+def validate_spec(spec):
+    """Normalized copy of a seller/product spec, or None for 'use suggestion'.
+    Raises ValueError for anything malformed (bad mode/source, invalid regex)."""
+    if not spec:
+        return None
+    mode = spec.get("mode")
+    if mode == "fixed":
+        value = (spec.get("value") or "").strip()
+        return {"mode": "fixed", "value": value} if value else None
+    if mode == "extract":
+        source, regex = spec.get("source"), spec.get("regex") or ""
+        if source not in SOURCES:
+            raise ValueError(f"unknown source {source!r}")
+        if not regex:
+            raise ValueError("extraction needs a regex")
+        try:
+            re.compile(regex)
+        except re.error as e:
+            raise ValueError(f"invalid regex: {e}") from None
+        out = {"mode": "extract", "source": source, "regex": regex}
+        if (spec.get("fallback") or "").strip():
+            out["fallback"] = spec["fallback"].strip()
+        return out
+    raise ValueError(f"unknown mode {mode!r}")
+
+
+def resolve_names(cat: dict, sender: str, subject: str, body: str = "") -> tuple:
+    """(seller, product) a category yields for one mail."""
+    sug_seller, sug_product = naming.suggest_names(sender, subject)
+    return (resolve_spec(cat.get("seller"), sender, subject, body, sug_seller),
+            resolve_spec(cat.get("product"), sender, subject, body, sug_product))
+
+
+def needs_body(cat: dict) -> bool:
+    return any((cat.get(k) or {}).get("source") == "body" for k in ("seller", "product"))
+
+
+def destination_of(cat: dict) -> Path:
+    return Path(cat["destination"]) if cat.get("destination") else RECEIPTS_DIR
+
+
+# ---------------------------------------------------------------------------
+# mutation helpers — each takes the in-memory list and returns a bool (or the
+# new dict); callers persist with save_categories().
 # ---------------------------------------------------------------------------
 
 def find(categories: list, category_id: str) -> dict:
@@ -106,33 +197,28 @@ def find(categories: list, category_id: str) -> dict:
     return None
 
 
-def new_category(name: str, *, seller=None, product=None, base_dir=None,
-                 subfolder=None, exclude=False, categories: list = None) -> dict:
+def new_category(name: str, *, destination=None, seller=None, product=None,
+                 exclude=False, categories: list = None) -> dict:
     taken = {c.get("id") for c in (categories or [])}
     return {
         "id": slugify(name, taken),
         "name": (name or "").strip() or "category",
-        "seller": seller or None,
-        "product": product or None,
-        "base_dir": base_dir or None,
-        "subfolder": subfolder or None,
+        "destination": (str(destination).strip() if destination else None) or None,
+        "seller": validate_spec(seller),
+        "product": validate_spec(product),
         "exclude": bool(exclude),
         "match": [],
     }
 
 
-def clean_match_entry(entry: dict, category: dict = None) -> dict:
-    """Keep only known keys with real values; drop per-entry seller/product that
-    just repeat the category default (so overrides are only stored when needed)."""
+def clean_match_entry(entry: dict) -> dict:
+    """Keep only known condition keys with real values."""
     out = {}
-    cat = category or {}
-    for k in MATCH_COND_KEYS + ("product_body_regex",):
-        v = entry.get(k)
+    for k in MATCH_COND_KEYS:
+        v = (entry or {}).get(k)
+        if isinstance(v, str):
+            v = v.strip()
         if v not in (None, "", []):
-            out[k] = v
-    for k in ("seller", "product"):
-        v = entry.get(k)
-        if v not in (None, "", []) and v != cat.get(k):
             out[k] = v
     return out
 
@@ -141,13 +227,12 @@ def add_match(categories: list, category_id: str, entry: dict) -> bool:
     cat = find(categories, category_id)
     if cat is None:
         return False
-    cleaned = clean_match_entry(entry, cat)
+    cleaned = clean_match_entry(entry)
     if not cleaned.get("sender_contains") and not cleaned.get("subject_contains"):
         return False
     cat.setdefault("match", [])
-    if cleaned in cat["match"]:
-        return True
-    cat["match"].append(cleaned)
+    if cleaned not in cat["match"]:
+        cat["match"].append(cleaned)
     return True
 
 
@@ -163,11 +248,18 @@ def update_category(categories: list, category_id: str, patch: dict) -> bool:
     cat = find(categories, category_id)
     if cat is None:
         return False
-    for k in ("name", "seller", "product", "base_dir", "subfolder"):
+    staged = {}
+    if "name" in patch:
+        staged["name"] = (patch["name"] or "").strip() or cat.get("name")
+    if "destination" in patch:
+        staged["destination"] = (str(patch["destination"]).strip()
+                                 if patch["destination"] else None) or None
+    for k in ("seller", "product"):
         if k in patch:
-            cat[k] = patch[k] or None
+            staged[k] = validate_spec(patch[k])      # may raise; nothing applied yet
     if "exclude" in patch:
-        cat["exclude"] = bool(patch["exclude"])
+        staged["exclude"] = bool(patch["exclude"])
+    cat.update(staged)
     return True
 
 
@@ -178,38 +270,33 @@ def delete_category(categories: list, category_id: str) -> bool:
 
 
 def merge_categories(categories: list, src_id: str, dst_id: str) -> bool:
-    """Move src's match entries into dst, then drop src. Where src and dst have
-    different default seller/product, src's defaults are baked onto the moved
-    entries so their routing is preserved."""
+    """Move src's match entries into dst, then drop src. dst's destination and
+    naming apply to the moved senders from then on."""
     if src_id == dst_id:
         return False
     src, dst = find(categories, src_id), find(categories, dst_id)
     if src is None or dst is None:
         return False
     for m in src.get("match", []):
-        moved = dict(m)
-        for k in ("seller", "product"):
-            if k not in moved and src.get(k) and src.get(k) != dst.get(k):
-                moved[k] = src[k]
-        cleaned = clean_match_entry(moved, dst)
+        cleaned = clean_match_entry(m)
         if cleaned and cleaned not in dst.setdefault("match", []):
             dst["match"].append(cleaned)
     return delete_category(categories, src_id)
-
-
-EXCLUDE_CATEGORY_ID = "excluded"
 
 
 def exclude_category(categories: list) -> dict:
     """The shared bucket for 'not a receipt' senders; created on first use."""
     cat = find(categories, EXCLUDE_CATEGORY_ID)
     if cat is None:
-        cat = {"id": EXCLUDE_CATEGORY_ID, "name": "(excluded)", "exclude": True,
-               "seller": None, "product": None, "base_dir": None,
-               "subfolder": None, "match": []}
+        cat = {"id": EXCLUDE_CATEGORY_ID, "name": "(excluded)", "destination": None,
+               "seller": None, "product": None, "exclude": True, "match": []}
         categories.append(cat)
     return cat
 
+
+# ---------------------------------------------------------------------------
+# matching
+# ---------------------------------------------------------------------------
 
 def _entry_matches(m: dict, sender: str, subject: str, body_norm: str) -> bool:
     sf = m.get("sender_contains") or ""
@@ -227,74 +314,41 @@ def _entry_matches(m: dict, sender: str, subject: str, body_norm: str) -> bool:
     return True
 
 
-def match_category(sender: str, subject: str = "", body: str = "",
-                   categories: list = None):
-    """First category with a matching `match[]` entry wins. Returns
-    `(seller, product, subfolder, base_dir)` — `base_dir` a Path or None —
-    or `(EXCLUDE, None, None, None)` for an exclude category, or None."""
+def find_match(sender: str, subject: str = "", body: str = "",
+               categories: list = None):
+    """The first category with a matching `match[]` entry, or None."""
     cats = categories if categories is not None else load_categories()
-    body_norm = re.sub(r"[\s\xa0]+", " ", body or "")
+    body_norm = normalize_body(body)
     for cat in cats:
         for m in cat.get("match", []):
-            if not _entry_matches(m, sender, subject, body_norm):
-                continue
-            if cat.get("exclude"):
-                return EXCLUDE, None, None, None
-            # per-entry overrides win over the category defaults
-            seller = m.get("seller") or cat.get("seller")
-            product = m.get("product") or cat.get("product")
-            rx = m.get("product_body_regex") or ""
-            if rx and body_norm:
-                hit = re.search(rx, body_norm)
-                if hit:
-                    product = _sanitize(hit.group(1).strip())
-            base_dir = Path(cat["base_dir"]) if cat.get("base_dir") else None
-            return seller, product, cat.get("subfolder"), base_dir
+            if _entry_matches(m, sender, subject, body_norm):
+                return cat
     return None
 
 
-def to_legacy_rules(categories: list = None) -> list:
-    """Flatten categories back into the old `custom_rules.json` dict shape — one
-    rule per `match[]` entry, category order then entry order preserved. Lets
-    `receipt_saver.match_custom()` and the providers' query builders keep working
-    unchanged (they iterate this list; first match wins, identically)."""
-    cats = categories if categories is not None else load_categories()
-    rules = []
-    for cat in cats:
-        for m in cat.get("match", []):
-            rule = {}
-            if m.get("sender_contains"):
-                rule["match_sender_contains"] = m["sender_contains"]
-            if m.get("subject_contains"):
-                rule["match_subject_contains"] = m["subject_contains"]
-            if m.get("exclude_subject_contains"):
-                rule["exclude_subject_contains"] = m["exclude_subject_contains"]
-            if m.get("body_contains"):
-                rule["match_body_contains"] = m["body_contains"]
-            if m.get("product_body_regex"):
-                rule["product_body_regex"] = m["product_body_regex"]
-            if cat.get("exclude"):
-                rule["exclude"] = True
-            else:
-                rule["seller"] = m.get("seller") or cat.get("seller")
-                rule["product"] = m.get("product") or cat.get("product")
-                rule["category"] = cat.get("subfolder")
-                if cat.get("base_dir"):
-                    rule["base_dir"] = cat["base_dir"]
-            rules.append(rule)
-    return rules
+def match_category(sender: str, subject: str = "", body: str = "",
+                   categories: list = None):
+    """`(seller, product, destination)` for the first matching category —
+    `destination` a Path — or `(EXCLUDE, None, None)` for an exclude category,
+    or None when nothing matches."""
+    cat = find_match(sender, subject, body, categories)
+    if cat is None:
+        return None
+    if cat.get("exclude"):
+        return EXCLUDE, None, None
+    seller, product = resolve_names(cat, sender, subject, body)
+    return seller, product, destination_of(cat)
 
 
-def sender_fragments(categories: list = None) -> list:
-    """Every non-empty `sender_contains` across all non-exclude categories —
-    used to build the mailbox search query (was: custom-rule senders)."""
+def query_terms(categories: list = None) -> list:
+    """One `{sender_contains, exclude_subject_contains}` per distinct match entry
+    (exclude categories included) — what the providers' mailbox searches use."""
     cats = categories if categories is not None else load_categories()
     out = []
     for cat in cats:
-        if cat.get("exclude"):
-            continue
         for m in cat.get("match", []):
-            frag = (m.get("sender_contains") or "").strip()
-            if frag and frag not in out:
-                out.append(frag)
+            t = {"sender_contains": m.get("sender_contains") or "",
+                 "exclude_subject_contains": m.get("exclude_subject_contains") or ""}
+            if t not in out:
+                out.append(t)
     return out

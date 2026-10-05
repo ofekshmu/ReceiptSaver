@@ -10,39 +10,35 @@ import receipt_roots
 class TestDiscoverRoots(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
-        self.rules = self.tmp / "custom_rules.json"
+        self.cats = self.tmp / "categories.json"
 
-    def _write(self, rules):
-        self.rules.write_text(json.dumps(rules, ensure_ascii=False), encoding="utf-8")
+    def _write(self, dests):
+        cats = [{"id": f"c{i}", "name": f"c{i}", "destination": d, "exclude": False,
+                 "seller": None, "product": None, "match": []}
+                for i, d in enumerate(dests)]
+        self.cats.write_text(json.dumps(cats, ensure_ascii=False), encoding="utf-8")
+
+    def roots(self):
+        return receipt_roots.discover_roots(categories_path=self.cats)
 
     def test_fixed_roots_present_and_ordered(self):
         self._write([])
-        roots = receipt_roots.discover_roots(rules_path=self.rules)
-        labels = [r["label"] for r in roots]
-        self.assertEqual(labels[:3], ["קבלות", "לטיפול ידני", "Japanologia"])
+        self.assertEqual([r["label"] for r in self.roots()][:3],
+                         ["קבלות", "לטיפול ידני", "Japanologia"])
 
-    def test_custom_base_dirs_appended_first_seen_order(self):
-        self._write([
-            {"match_sender_contains": "a.com", "base_dir": r"C:\X\נכסים"},
-            {"match_sender_contains": "b.com", "base_dir": r"C:\X\נכסים\שלום שבאזי 7"},
-            {"match_sender_contains": "c.com", "base_dir": r"C:\X\נכסים"},  # dup
-            {"match_sender_contains": "d.com"},                            # no base_dir
-        ])
-        roots = receipt_roots.discover_roots(rules_path=self.rules)
-        tail = [r["label"] for r in roots[3:]]
-        self.assertEqual(tail, ["נכסים", "שלום שבאזי 7"])
+    def test_outside_destinations_added_nested_ones_fold_into_parent(self):
+        self._write([r"C:\X\נכסים\שלום שבאזי 7\חשבנות", r"C:\X\נכסים", r"C:\Y\מילואים",
+                     r"C:\X\נכסים", None])
+        self.assertEqual([r["label"] for r in self.roots()[3:]], ["נכסים", "מילואים"])
 
-    def test_base_dir_equal_to_receipts_dir_collapses(self):
-        self._write([{"match_sender_contains": "a.com",
-                      "base_dir": str(receipt_roots.RECEIPTS_DIR)}])
-        roots = receipt_roots.discover_roots(rules_path=self.rules)
-        paths = [os.path.normcase(os.path.normpath(r["path"])) for r in roots]
-        self.assertEqual(len(paths), len(set(paths)))
+    def test_destination_under_receipts_dir_is_not_a_new_root(self):
+        self._write([str(receipt_roots.RECEIPTS_DIR / "חשבנות" / "חשמל"),
+                     str(receipt_roots.RECEIPTS_DIR)])
+        self.assertEqual(len(self.roots()), 3)
 
-    def test_unreadable_rules_falls_back_to_fixed_roots(self):
-        self.rules.write_text("{ not json", encoding="utf-8")
-        roots = receipt_roots.discover_roots(rules_path=self.rules)
-        self.assertEqual([r["label"] for r in roots],
+    def test_unreadable_categories_fall_back_to_fixed_roots(self):
+        self.cats.write_text("{ not json", encoding="utf-8")
+        self.assertEqual([r["label"] for r in self.roots()],
                          ["קבלות", "לטיפול ידני", "Japanologia"])
 
 
