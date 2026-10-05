@@ -119,16 +119,59 @@
         <div class="field">
           <label>Match rules <span class="hint">(a mail matches if any rule matches; a rule needs all its conditions)</span></label>
           <div class="cat-matches"></div>
-          <div class="match-grid cat-add-match">
-            <input class="f-sender" dir="auto" placeholder="sender contains">
-            <input class="f-subject" dir="auto" placeholder="subject contains">
-            <input class="f-subject-not" dir="auto" placeholder="subject does NOT contain">
-            <input class="f-body" dir="auto" placeholder="body contains">
+          <div class="cat-add-match">
+            <div class="mr-slot"></div>
             <button type="button" class="cat-add-match-btn">Add rule</button>
           </div>
         </div>
       </div>
     </article>
+  </template>
+
+  <!-- Match rule: pill lists per condition + attachments + keyword chips (makeMatchRule) -->
+  <template id="tpl-matchrule">
+    <div class="mr">
+      <div class="mr-row" data-key="sender_contains">
+        <span class="mr-lbl">Sender contains</span>
+        <div class="mr-pills"></div>
+        <input class="mr-add" dir="auto" placeholder="type + Enter" title="Text in the sender address, e.g. the domain">
+      </div>
+      <div class="mr-row" data-key="subject_contains">
+        <span class="mr-lbl">Subject contains</span>
+        <div class="mr-pills"></div>
+        <input class="mr-add" dir="auto" placeholder="type + Enter">
+      </div>
+      <div class="mr-row" data-key="exclude_subject_contains">
+        <span class="mr-lbl">Subject must NOT contain</span>
+        <div class="mr-pills"></div>
+        <input class="mr-add" dir="auto" placeholder="type + Enter">
+      </div>
+      <div class="mr-row" data-key="body_contains">
+        <span class="mr-lbl">Body contains</span>
+        <div class="mr-pills"></div>
+        <input class="mr-add" dir="auto" placeholder="type + Enter">
+      </div>
+      <div class="mr-row" data-key="exclude_body_contains">
+        <span class="mr-lbl">Body must NOT contain</span>
+        <div class="mr-pills"></div>
+        <input class="mr-add" dir="auto" placeholder="type + Enter">
+      </div>
+      <div class="mr-row mr-att-row">
+        <span class="mr-lbl">Attachments</span>
+        <select class="mr-attachments" title="Documents attached (images such as logos don't count)">
+          <option value="">Any</option>
+          <option value="none">None</option>
+          <option value="one">Exactly 1</option>
+          <option value="many">More than 1</option>
+        </select>
+        <span class="mr-att-hint"></span>
+      </div>
+      <div class="mr-suggest" hidden>
+        <div class="mr-sg" data-group="sender"><span class="mr-sg-lbl">Sender</span><div class="mr-chips"></div></div>
+        <div class="mr-sg" data-group="subject"><span class="mr-sg-lbl">Subject</span><div class="mr-chips"></div></div>
+        <div class="mr-sg" data-group="body"><span class="mr-sg-lbl">Body</span><div class="mr-chips"></div></div>
+      </div>
+    </div>
   </template>
 
   <!-- Seller / Product field: a value, "use for every mail", or an extraction rule -->
@@ -211,8 +254,8 @@
         <form class="fb-form">
           <fieldset class="fb-kinds">
             <legend>What to do with this email</legend>
-            <label class="opt">
-              <span class="opt-head"><input type="radio" name="kind" value="category" checked> File under a category</span>
+            <div class="opt">
+              <label class="opt-head"><input type="radio" name="kind" value="category" checked> File under a category</label>
               <span class="opt-desc">File this email now <b>and</b> remember it: pick an existing category or create a new one, so future emails like it file automatically.</span>
               <span class="opt-body">
                 <div class="combo f-cat-assign" data-value="">
@@ -224,19 +267,23 @@
                 <input class="f-cat-name" type="text" dir="auto" hidden
                        placeholder="New category name (e.g. חשמל)">
               </span>
-            </label>
-            <label class="opt">
-              <span class="opt-head"><input type="radio" name="kind" value="exclude"> Exclude as promotional</span>
+              <div class="opt-slot"></div>
+            </div>
+            <div class="opt">
+              <label class="opt-head"><input type="radio" name="kind" value="exclude"> Exclude as promotional</label>
               <span class="opt-desc">This is not a receipt (newsletter / ad). Deletes the saved folder and auto-skips future emails matching the rule below.</span>
-            </label>
-            <label class="opt">
-              <span class="opt-head"><input type="radio" name="kind" value="once"> Move this one only</span>
+              <div class="opt-slot"></div>
+            </div>
+            <div class="opt">
+              <label class="opt-head"><input type="radio" name="kind" value="once"> Move this one only</label>
               <span class="opt-desc">File just this one email using the settings below. Nothing is remembered &mdash; a similar email later will land in fallbacks again.</span>
-            </label>
-            <label class="opt">
-              <span class="opt-head"><input type="radio" name="kind" value="skip"> Skip</span>
+              <div class="opt-slot"></div>
+            </div>
+            <div class="opt">
+              <label class="opt-head"><input type="radio" name="kind" value="skip"> Skip</label>
               <span class="opt-desc">Remove it from this list without filing anything. The folder stays in <span dir="rtl">_לטיפול ידני</span>.</span>
-            </label>
+              <div class="opt-slot"></div>
+            </div>
           </fieldset>
 
           <div class="fb-fields">
@@ -264,15 +311,8 @@
             <div class="field fd-match">
               <label>Match rule</label>
               <div class="fb-match-existing" hidden></div>
-              <div class="match-grid">
-                <input class="f-sender" dir="auto" placeholder="sender contains"
-                       title="Text in the sender address — usually the domain, e.g. electra-power.co.il">
-                <input class="f-subject" dir="auto" placeholder="subject contains (optional)"
-                       title="Also require this text in the subject — useful for shared payment platforms">
-                <input class="f-subject-not" dir="auto" placeholder="subject does NOT contain (optional)">
-                <input class="f-body" dir="auto" placeholder="body contains (optional)">
-              </div>
-              <span class="hint">Future emails matching all of these conditions follow this choice.</span>
+              <div class="mr-slot"></div>
+              <span class="hint">Future emails matching <b>all</b> of these conditions follow this choice. Click a suggested keyword to add it; ≠ flips it to “must NOT contain”.</span>
             </div>
           </div>
           <button type="submit" class="fb-apply">Apply</button>

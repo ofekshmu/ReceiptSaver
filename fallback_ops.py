@@ -210,7 +210,7 @@ def apply_decision(entry: dict, decision: dict, *,
         return {"ok": True, "kind": "skip"}
 
     if kind == "exclude":
-        if not (match.get("sender_contains") or match.get("subject_contains")):
+        if not _cat.has_anchor(match):
             return {"ok": False, "error": "exclude needs a sender or subject condition"}
         cats = _cat.load_categories(categories_path)
         xc = _cat.exclude_category(cats)
@@ -220,7 +220,8 @@ def apply_decision(entry: dict, decision: dict, *,
             shutil.rmtree(src, ignore_errors=True)
         _append_json_list(cleanup_log_path, {
             "action": "DELETED", "folder": entry["folder_name"],
-            "reason": f'excluded via fallback UI ({match.get("sender_contains") or match.get("subject_contains")})',
+            "reason": "excluded via fallback UI (" + ", ".join(
+                _cat.as_list(match.get("sender_contains")) + _cat.as_list(match.get("subject_contains"))) + ")",
             "timestamp": _dt.datetime.now().isoformat()})
         _resolve()
         history.upsert(rec_id, {**_history_base(),
@@ -246,7 +247,7 @@ def apply_decision(entry: dict, decision: dict, *,
 
     if kind not in ("category", "new_category"):
         return {"ok": False, "error": f"unknown decision kind {kind!r}"}
-    if not (match.get("sender_contains") or match.get("subject_contains")):
+    if not _cat.has_anchor(match):
         return {"ok": False, "error": "the match rule needs a sender or subject condition"}
 
     cats = _cat.load_categories(categories_path)

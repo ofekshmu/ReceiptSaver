@@ -126,6 +126,22 @@ class TestApplyDecision(_Base):
         self.assertRegex(row["resolved_at"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d$")
         self.assertEqual(self._entry()["resolved_at"], row["resolved_at"])
 
+    def test_new_category_stores_list_conditions_and_attachments(self):
+        self.apply({
+            "kind": "new_category", "category_name": "שופ", "destination": str(self.receipts),
+            "seller": name("שופ"), "product": name("חשבונית"),
+            "match": {"sender_contains": ["shop.co.il"], "subject_contains": ["קבלה", "הזמנה"],
+                      "exclude_body_contains": ["בוטלה"], "body_contains": [],
+                      "attachments": "one"},
+        })
+        self.assertEqual(self._cats()[0]["match"], [{
+            "sender_contains": "shop.co.il", "subject_contains": ["קבלה", "הזמנה"],
+            "exclude_body_contains": "בוטלה", "attachments": "one"}])
+
+    def test_rule_with_only_body_conditions_is_rejected(self):
+        res = self.apply({"kind": "exclude", "match": {"body_contains": ["x"]}})
+        self.assertFalse(res["ok"])
+
     def test_unticked_name_is_this_mail_only(self):
         self.apply({
             "kind": "new_category", "category_name": "שופ", "destination": str(self.receipts),

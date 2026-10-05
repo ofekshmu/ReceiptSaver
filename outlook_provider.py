@@ -21,6 +21,8 @@ from pathlib import Path
 import msal
 import requests
 
+import categories
+
 log = logging.getLogger("receipt_saver")
 
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
@@ -204,6 +206,7 @@ def fetch_message(service, msg_id: str, account: dict) -> dict:
         "body_text": body_text,
         "body_html": body_html,
         "first_attachment_name": first_attachment_name,
+        "attachment_count": categories.count_documents(attachment_names),
         "attachments": lambda: _fetch_attachments(access_token, msg_id),
         "link": _outlook_link(msg_id),
     }

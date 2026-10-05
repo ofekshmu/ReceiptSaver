@@ -189,15 +189,86 @@ class TestHelpers(unittest.TestCase):
 
     def test_query_terms_cover_every_entry_including_excludes(self):
         terms = C.query_terms(CATS)
-        self.assertIn({"sender_contains": "haifa.muni.il", "exclude_subject_contains": ""},
+        self.assertIn({"sender_contains": "haifa.muni.il", "exclude_subject_contains": []},
                       terms)
         self.assertIn({"sender_contains": "shop.example",
-                       "exclude_subject_contains": "פרסומת"}, terms)
+                       "exclude_subject_contains": ["פרסומת"]}, terms)
         self.assertEqual(len(terms), 8)
 
     def test_query_terms_dedup(self):
         cats = [CATS[0], CATS[0]]
         self.assertEqual(len(C.query_terms(cats)), 2)
+
+    def test_query_terms_one_per_sender_fragment_with_all_exclusions(self):
+        cats = [{"id": "x", "match": [{"sender_contains": ["onecity.co.il", "חיפה"],
+                                       "exclude_subject_contains": ["פרסומת", "מבצע"]}]}]
+        self.assertEqual(C.query_terms(cats), [
+            {"sender_contains": "onecity.co.il", "exclude_subject_contains": ["פרסומת", "מבצע"]},
+            {"sender_contains": "חיפה", "exclude_subject_contains": ["פרסומת", "מבצע"]}])
+
+
+class TestListConditionsAndAttachments(unittest.TestCase):
+    def cats(self, **m):
+        return [{"id": "c", "name": "c", "destination": R, "exclude": False,
+                 "seller": FIXED("S"), "product": FIXED("P"),
+                 "match": [dict({"sender_contains": "shop.co.il"}, **m)]}]
+
+    def m(self, cats, subject="", body="", n=None, sender="a@shop.co.il"):
+        return C.match_category(sender, subject, body, categories=cats, attachment_count=n)
+
+    def test_all_listed_subject_words_required(self):
+        cats = self.cats(subject_contains=["קבלה", "הזמנה"])
+        self.assertIsNotNone(self.m(cats, "קבלה על הזמנה 5"))
+        self.assertIsNone(self.m(cats, "קבלה בלבד"))
+
+    def test_all_listed_sender_fragments_required(self):
+        cats = self.cats(sender_contains=["shop.co.il", "billing"])
+        self.assertIsNotNone(self.m(cats, sender="billing@shop.co.il"))
+        self.assertIsNone(self.m(cats, sender="news@shop.co.il"))
+
+    def test_any_excluded_subject_word_blocks(self):
+        cats = self.cats(exclude_subject_contains=["פרסומת", "מבצע"])
+        self.assertIsNotNone(self.m(cats, "קבלה"))
+        self.assertIsNone(self.m(cats, "מבצע חם"))
+
+    def test_body_lists_and_negative_body(self):
+        cats = self.cats(body_contains=["מספר הזמנה", "סה\"כ"], exclude_body_contains=["בוטלה"])
+        self.assertIsNotNone(self.m(cats, body="מספר הזמנה 1 סה\"כ 50"))
+        self.assertIsNone(self.m(cats, body="מספר הזמנה 1"))
+        self.assertIsNone(self.m(cats, body="מספר הזמנה 1 סה\"כ 50 ההזמנה בוטלה"))
+
+    def test_attachment_condition(self):
+        for want, ok, bad in (("none", 0, 1), ("one", 1, 2), ("many", 3, 1)):
+            cats = self.cats(attachments=want)
+            self.assertIsNotNone(self.m(cats, n=ok), want)
+            self.assertIsNone(self.m(cats, n=bad), want)
+
+    def test_unknown_attachment_count_is_not_checked(self):
+        self.assertIsNotNone(self.m(self.cats(attachments="none"), n=None))
+
+    def test_count_documents_ignores_images(self):
+        self.assertEqual(C.count_documents(["a.PDF", "logo.png", "b.docx", "x.JPG", "noext"]), 3)
+        self.assertEqual(C.count_documents([]), 0)
+
+
+class TestCleanMatchEntry(unittest.TestCase):
+    def test_lists_normalised_single_value_stored_as_string(self):
+        self.assertEqual(C.clean_match_entry({
+            "sender_contains": [" shop.co.il ", ""],
+            "subject_contains": ["a", "b", "a"],
+            "exclude_body_contains": [],
+            "attachments": "one", "junk": 1}),
+            {"sender_contains": "shop.co.il", "subject_contains": ["a", "b"],
+             "attachments": "one"})
+
+    def test_invalid_attachments_dropped(self):
+        self.assertEqual(C.clean_match_entry({"sender_contains": "x", "attachments": "any"}),
+                         {"sender_contains": "x"})
+
+    def test_as_list(self):
+        self.assertEqual(C.as_list(" a "), ["a"])
+        self.assertEqual(C.as_list(None), [])
+        self.assertEqual(C.as_list(["a", " ", "b"]), ["a", "b"])
 
 
 if __name__ == "__main__":

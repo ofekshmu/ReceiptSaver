@@ -46,9 +46,27 @@ RECEIPTS_DIR = Path(r"C:\Users\ofeks\OneDrive\Documents\קבלות")
 EXCLUDE = "__exclude__"
 EXCLUDE_CATEGORY_ID = "excluded"
 
-MATCH_COND_KEYS = ("sender_contains", "subject_contains", "exclude_subject_contains",
-                   "body_contains")
+# text conditions — each a string or a list of strings
+LIST_KEYS = ("sender_contains", "subject_contains", "exclude_subject_contains",
+             "body_contains", "exclude_body_contains")
+MATCH_COND_KEYS = LIST_KEYS + ("attachments",)
+ATTACHMENT_RULES = ("none", "one", "many")
 SOURCES = ("subject", "body", "sender_name")
+_IMAGE_EXT = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg", ".heic",
+              ".heif", ".tif", ".tiff", ".ico"}
+
+
+def as_list(value) -> list:
+    """A condition value (str | list | None) as a list of non-empty strings."""
+    if value is None:
+        return []
+    items = value if isinstance(value, (list, tuple)) else [value]
+    return [str(v).strip() for v in items if str(v or "").strip()]
+
+
+def count_documents(names) -> int:
+    """Attachments that count for the `attachments` condition: everything but images."""
+    return sum(1 for n in names or [] if os.path.splitext(str(n))[1].lower() not in _IMAGE_EXT)
 
 
 # ---------------------------------------------------------------------------
@@ -212,15 +230,25 @@ def new_category(name: str, *, destination=None, seller=None, product=None,
 
 
 def clean_match_entry(entry: dict) -> dict:
-    """Keep only known condition keys with real values."""
+    """Keep only known conditions with real values. Text conditions are
+    de-duplicated and stored as a string when there is one value, else a list."""
     out = {}
-    for k in MATCH_COND_KEYS:
-        v = (entry or {}).get(k)
-        if isinstance(v, str):
-            v = v.strip()
-        if v not in (None, "", []):
-            out[k] = v
+    for k in LIST_KEYS:
+        vals = []
+        for v in as_list((entry or {}).get(k)):
+            if v not in vals:
+                vals.append(v)
+        if vals:
+            out[k] = vals[0] if len(vals) == 1 else vals
+    if (entry or {}).get("attachments") in ATTACHMENT_RULES:
+        out["attachments"] = entry["attachments"]
     return out
+
+
+def has_anchor(entry: dict) -> bool:
+    """A rule must name a sender or subject condition (body/attachments alone
+    would match far too much)."""
+    return bool(as_list(entry.get("sender_contains")) or as_list(entry.get("subject_contains")))
 
 
 def add_match(categories: list, category_id: str, entry: dict) -> bool:
@@ -228,7 +256,7 @@ def add_match(categories: list, category_id: str, entry: dict) -> bool:
     if cat is None:
         return False
     cleaned = clean_match_entry(entry)
-    if not cleaned.get("sender_contains") and not cleaned.get("subject_contains"):
+    if not has_anchor(cleaned):
         return False
     cat.setdefault("match", [])
     if cleaned not in cat["match"]:
@@ -298,40 +326,49 @@ def exclude_category(categories: list) -> dict:
 # matching
 # ---------------------------------------------------------------------------
 
-def _entry_matches(m: dict, sender: str, subject: str, body_norm: str) -> bool:
-    sf = m.get("sender_contains") or ""
-    jf = m.get("subject_contains") or ""
-    xf = m.get("exclude_subject_contains") or ""
-    bf = m.get("body_contains") or ""
-    if sf and sf.lower() not in (sender or "").lower():
+def _entry_matches(m: dict, sender: str, subject: str, body_norm: str,
+                   attachment_count: int = None) -> bool:
+    """ALL positive conditions hold and NONE of the negative ones does.
+    Sender/subject are case-insensitive; body is case-sensitive (as before).
+    `attachment_count` None = unknown, so the attachments condition is skipped."""
+    s, j = (sender or "").lower(), (subject or "").lower()
+    if any(f.lower() not in s for f in as_list(m.get("sender_contains"))):
         return False
-    if jf and jf.lower() not in (subject or "").lower():
+    if any(f.lower() not in j for f in as_list(m.get("subject_contains"))):
         return False
-    if xf and xf.lower() in (subject or "").lower():
+    if any(f.lower() in j for f in as_list(m.get("exclude_subject_contains"))):
         return False
-    if bf and bf not in body_norm:          # body match is case-sensitive (as before)
+    if any(f not in body_norm for f in as_list(m.get("body_contains"))):
         return False
+    if any(f in body_norm for f in as_list(m.get("exclude_body_contains"))):
+        return False
+    rule = m.get("attachments")
+    if rule in ATTACHMENT_RULES and attachment_count is not None:
+        n = int(attachment_count)
+        if (rule == "none" and n != 0) or (rule == "one" and n != 1) or \
+           (rule == "many" and n < 2):
+            return False
     return True
 
 
 def find_match(sender: str, subject: str = "", body: str = "",
-               categories: list = None):
+               categories: list = None, attachment_count: int = None):
     """The first category with a matching `match[]` entry, or None."""
     cats = categories if categories is not None else load_categories()
     body_norm = normalize_body(body)
     for cat in cats:
         for m in cat.get("match", []):
-            if _entry_matches(m, sender, subject, body_norm):
+            if _entry_matches(m, sender, subject, body_norm, attachment_count):
                 return cat
     return None
 
 
 def match_category(sender: str, subject: str = "", body: str = "",
-                   categories: list = None):
+                   categories: list = None, attachment_count: int = None):
     """`(seller, product, destination)` for the first matching category —
     `destination` a Path — or `(EXCLUDE, None, None)` for an exclude category,
     or None when nothing matches."""
-    cat = find_match(sender, subject, body, categories)
+    cat = find_match(sender, subject, body, categories, attachment_count)
     if cat is None:
         return None
     if cat.get("exclude"):
@@ -341,14 +378,16 @@ def match_category(sender: str, subject: str = "", body: str = "",
 
 
 def query_terms(categories: list = None) -> list:
-    """One `{sender_contains, exclude_subject_contains}` per distinct match entry
-    (exclude categories included) — what the providers' mailbox searches use."""
+    """One `{sender_contains: str, exclude_subject_contains: [str]}` per distinct
+    sender fragment of every match entry (exclude categories included) — what
+    the providers' mailbox searches use."""
     cats = categories if categories is not None else load_categories()
     out = []
     for cat in cats:
         for m in cat.get("match", []):
-            t = {"sender_contains": m.get("sender_contains") or "",
-                 "exclude_subject_contains": m.get("exclude_subject_contains") or ""}
-            if t not in out:
-                out.append(t)
+            excl = as_list(m.get("exclude_subject_contains"))
+            for frag in as_list(m.get("sender_contains")) or [""]:
+                t = {"sender_contains": frag, "exclude_subject_contains": excl}
+                if t not in out:
+                    out.append(t)
     return out

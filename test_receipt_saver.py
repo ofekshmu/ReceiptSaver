@@ -114,6 +114,36 @@ class TestCategoryRouting(unittest.TestCase):
                                             {"label": "ofek", "email": "o@x"})
         self.assertEqual(res["status"], "excluded")
 
+    def test_attachment_condition_uses_message_count(self):
+        import json, categories
+        cats = json.loads(categories.CATEGORIES_FILE.read_text(encoding="utf-8"))
+        cats[0]["match"][0]["attachments"] = "one"
+        categories.CATEGORIES_FILE.write_text(json.dumps(cats, ensure_ascii=False),
+                                              encoding="utf-8")
+        orig = receipt_saver.FALLBACK_LOG_FILE, receipt_saver.MANUAL_DIR
+        self.addCleanup(setattr, receipt_saver, "FALLBACK_LOG_FILE", orig[0])
+        self.addCleanup(setattr, receipt_saver, "MANUAL_DIR", orig[1])
+        receipt_saver.FALLBACK_LOG_FILE = self.tmp / "fallback_log.json"
+        receipt_saver.MANUAL_DIR = self.tmp / "manual"
+        acct = {"label": "ofek", "email": "o@x"}
+        one = dict(self._msg("bill@iectest.co.il", "חשבון 1"), attachment_count=1)
+        none = dict(self._msg("bill@iectest.co.il", "חשבון 2"), attachment_count=0, id="m2")
+        self.assertEqual(receipt_saver.process_message(one, acct)["status"], "saved")
+        self.assertEqual(receipt_saver.process_message(none, acct)["status"], "fallback")
+        logged = json.loads(receipt_saver.FALLBACK_LOG_FILE.read_text(encoding="utf-8"))
+        self.assertEqual(logged[0]["attachment_count"], 0)
+
+
+class TestGmailAttachmentNames(unittest.TestCase):
+    def test_nested_parts_and_document_count(self):
+        import gmail_provider, categories
+        payload = {"parts": [{"filename": "a.pdf"},
+                             {"filename": "", "parts": [{"filename": "logo.png"},
+                                                        {"filename": "b.PDF"}]}]}
+        names = gmail_provider._attachment_names(payload)
+        self.assertEqual(names, ["a.pdf", "logo.png", "b.PDF"])
+        self.assertEqual(categories.count_documents(names), 2)
+
 
 class TestUniqueFolder(unittest.TestCase):
     def setUp(self):

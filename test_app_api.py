@@ -371,6 +371,42 @@ class TestCategoryApi(unittest.TestCase):
         self.assertEqual(res["seller"], "פזגז")
         self.assertTrue(res["product"])                    # app suggestion
 
+    def test_keyword_suggestions_without_body_needs_no_network(self):
+        api = self._api()
+        with mock.patch.object(api, "_fetch_text", side_effect=AssertionError("no fetch")):
+            res = api.keyword_suggestions("m1", False)
+        self.assertTrue(res["ok"])
+        self.assertEqual(res["sender"][0], "iec.co.il")
+        self.assertIn("IEC", res["sender"])
+        self.assertEqual(res["body"], [])
+
+    def test_keyword_suggestions_with_body(self):
+        api = self._api()
+        with mock.patch.object(api, "_fetch_text",
+                               return_value={"body": "מספר הזמנה 77 חברת החשמל לישראל"}):
+            res = api.keyword_suggestions("m1", True)
+        self.assertEqual(res["body"][0], "מספר הזמנה")
+
+    def test_keyword_suggestions_body_failure_is_reported(self):
+        api = self._api()
+        with mock.patch.object(api, "_fetch_text", side_effect=RuntimeError("offline")):
+            res = api.keyword_suggestions("m1", True)
+        self.assertTrue(res["ok"])
+        self.assertEqual(res["body"], [])
+        self.assertIn("offline", res["body_error"])
+
+    def test_attachment_count_from_log_or_folder(self):
+        api = self._api()
+        folder = self.tmp / "f"
+        folder.mkdir()
+        for n in ("email.pdf", "inv.pdf", "logo.png", "b.xlsx"):
+            (folder / n).write_text("x", encoding="utf-8")
+        self.assertEqual(api.suggest_fallback("m1")["attachment_count"], 2)
+        rows = json.loads(self.flog.read_text(encoding="utf-8"))
+        rows[0]["attachment_count"] = 0
+        self.flog.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+        self.assertEqual(api.suggest_fallback("m1")["attachment_count"], 0)
+
     def test_destination_suggestions_ranked_by_use(self):
         import receipt_roots
         hist = self.tmp / "history.json"

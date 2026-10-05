@@ -471,7 +471,8 @@ def process_message(msg: dict, account: dict, run_id: str = "") -> dict:
         m = re.search(r"מאת\s+(.+?)$", subject)
         seller  = sanitize(m.group(1).strip()) if m else "iCount"
         product = "חשבונית מס קבלה"
-        cat_match = categories.match_category(sender, subject)
+        cat_match = categories.match_category(sender, subject,
+                                              attachment_count=msg.get("attachment_count"))
         base_dir  = (cat_match[2] if cat_match and cat_match[0] != categories.EXCLUDE
                      else RECEIPTS_DIR)
         category  = _category_label(base_dir)
@@ -508,7 +509,8 @@ def process_message(msg: dict, account: dict, run_id: str = "") -> dict:
 
     # ── Step 2: categories ─────────────────────────────────────────────
     body   = msg["body_text"]
-    custom = categories.match_category(sender, subject, body)
+    custom = categories.match_category(sender, subject, body,
+                                       attachment_count=msg.get("attachment_count"))
     if custom:
         seller, product, base_dir = custom
         if seller == categories.EXCLUDE:
@@ -551,6 +553,7 @@ def process_message(msg: dict, account: dict, run_id: str = "") -> dict:
         "subject":       subject,
         "folder_name":   folder_name,
         "folder_path":   str(folder),
+        "attachment_count": msg.get("attachment_count"),
         "resolved":      False,
     })
     rec = _make_record(msg, account, run_id, "FALLBACK", folder, folder_name, files)

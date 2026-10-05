@@ -176,7 +176,24 @@ class Api:
 
     def suggest_fallback(self, message_id: str) -> dict:
         entry = self._fallback_by_id(message_id)
-        return fallback_ops.suggest(entry) if entry else {}
+        if not entry:
+            return {}
+        return {**fallback_ops.suggest(entry),
+                "attachment_count": self._attachment_count(entry)}
+
+    @staticmethod
+    def _attachment_count(entry: dict):
+        """Documents attached to a fallback mail: recorded at scan time, else
+        counted from its folder (minus email.pdf; images never count)."""
+        import categories as C
+        if entry.get("attachment_count") is not None:
+            return entry["attachment_count"]
+        try:
+            names = [n for n in os.listdir(entry.get("folder_path") or "")
+                     if n.lower() != "email.pdf"]
+        except OSError:
+            return None
+        return C.count_documents(names)
 
     def apply_fallback(self, message_id: str, decision: dict) -> dict:
         entry = self._fallback_by_id(message_id)
@@ -302,6 +319,25 @@ class Api:
         except ValueError as e:
             return {"ok": False, "error": str(e)}
         return {"ok": True, "value": value}
+
+    def keyword_suggestions(self, message_id: str, include_body: bool = False) -> dict:
+        """Keyword chips for building a match rule from one fallback mail.
+        Without `include_body` this never touches the network."""
+        import keywords
+        entry = self._fallback_by_id(message_id)
+        if not entry:
+            return {"ok": False, "error": "entry not found"}
+        body, body_error = "", None
+        if include_body:
+            try:
+                body = self._body(entry)
+            except Exception as e:
+                body_error = f"couldn't fetch the mail body: {e}"
+        out = {"ok": True, **keywords.suggest(entry.get("sender", ""),
+                                              entry.get("subject", ""), body)}
+        if body_error:
+            out["body_error"] = body_error
+        return out
 
     def preview_category(self, message_id: str, category_id: str) -> dict:
         """What an existing category would name and file this mail as."""

@@ -587,22 +587,165 @@ function specSummary(sp) {
   return `from ${where}`;
 }
 
+const asList = v => (Array.isArray(v) ? v : (v == null ? [] : [v]))
+  .map(x => String(x).trim()).filter(Boolean);
+const ATTACH_TEXT = { none: "no attachment", one: "exactly 1 attachment", many: "2+ attachments" };
+
 function matchText(m) {
-  return [m.sender_contains && `from ${m.sender_contains}`,
-          m.subject_contains && `subject ~ “${m.subject_contains}”`,
-          m.exclude_subject_contains && `subject ≁ “${m.exclude_subject_contains}”`,
-          m.body_contains && `body ~ “${m.body_contains}”`].filter(Boolean).join("  ·  ")
+  const q = (lbl, k) => asList(m[k]).map(v => `${lbl} “${v}”`);
+  return [...asList(m.sender_contains).map(v => `from ${v}`),
+          ...q("subject ~", "subject_contains"),
+          ...q("subject ≁", "exclude_subject_contains"),
+          ...q("body ~", "body_contains"),
+          ...q("body ≁", "exclude_body_contains"),
+          ATTACH_TEXT[m.attachments]].filter(Boolean).join("  ·  ")
          || "(empty rule)";
 }
 
-function readMatch(scope) {
-  return {
-    sender_contains: $(".f-sender", scope).value.trim(),
-    subject_contains: $(".f-subject", scope).value.trim(),
-    exclude_subject_contains: $(".f-subject-not", scope).value.trim(),
-    body_contains: $(".f-body", scope).value.trim(),
+// ---- match-rule widget ------------------------------------------------------
+// One pill list per condition (ALL positives must hold, NO negative may), an
+// attachments select, and optional keyword chips (sender / subject / body) that
+// add/remove pills. ≠ on a subject/body pill flips it between "contains" and
+// "must NOT contain". suggest(includeBody) -> Api.keyword_suggestions result.
+const MR_FLIP = { subject_contains: "exclude_subject_contains",
+                  exclude_subject_contains: "subject_contains",
+                  body_contains: "exclude_body_contains",
+                  exclude_body_contains: "body_contains" };
+const MR_GROUP_KEYS = { sender: ["sender_contains"],
+                        subject: ["subject_contains", "exclude_subject_contains"],
+                        body: ["body_contains", "exclude_body_contains"] };
+
+function makeMatchRule(slot, { entry, suggest, attachmentHint } = {}) {
+  const root = $("#tpl-matchrule").content.cloneNode(true).querySelector(".mr");
+  slot.innerHTML = "";
+  slot.appendChild(root);
+  const vals = {};
+  const rows = {};
+  $$(".mr-row[data-key]", root).forEach(r => { rows[r.dataset.key] = r; vals[r.dataset.key] = []; });
+  const att = $(".mr-attachments", root);
+  const sugBox = $(".mr-suggest", root);
+  let chips = { sender: [], subject: [], body: [] };
+  let bodyState = "idle";                 // idle | loading | done | error
+
+  function renderPills(key) {
+    const box = $(".mr-pills", rows[key]);
+    box.innerHTML = "";
+    vals[key].forEach(v => {
+      const pill = document.createElement("span");
+      pill.className = "mr-pill" + (key.startsWith("exclude_") ? " neg" : "");
+      const t = document.createElement("bdi");
+      t.textContent = v;
+      pill.appendChild(t);
+      if (MR_FLIP[key]) {
+        const flip = document.createElement("button");
+        flip.type = "button"; flip.className = "mr-flip"; flip.textContent = "≠";
+        flip.title = key.startsWith("exclude_") ? "Make it “must contain”" : "Make it “must NOT contain”";
+        flip.addEventListener("click", () => { remove(key, v); add(MR_FLIP[key], v); });
+        pill.appendChild(flip);
+      }
+      const x = document.createElement("button");
+      x.type = "button"; x.className = "mr-x"; x.textContent = "×"; x.title = "Remove";
+      x.addEventListener("click", () => remove(key, v));
+      pill.appendChild(x);
+      box.appendChild(pill);
+    });
+  }
+  function add(key, v) {
+    v = String(v || "").trim();
+    if (!v || vals[key].includes(v)) return;
+    vals[key].push(v); renderPills(key); renderChips();
+  }
+  function remove(key, v) {
+    vals[key] = vals[key].filter(x => x !== v); renderPills(key); renderChips();
+  }
+  function renderChips() {
+    for (const group of ["sender", "subject", "body"]) {
+      const box = $(`.mr-sg[data-group=${group}] .mr-chips`, root);
+      box.innerHTML = "";
+      if (group === "body" && bodyState !== "done") {
+        const note = document.createElement("span");
+        note.className = "mr-note";
+        note.textContent = { idle: "loads when you start editing this email",
+                             loading: "reading the email…",
+                             error: chips.bodyError || "couldn't read the email body" }[bodyState] || "";
+        box.appendChild(note);
+        continue;
+      }
+      if (!chips[group].length) {
+        const note = document.createElement("span");
+        note.className = "mr-note"; note.textContent = "nothing distinctive";
+        box.appendChild(note);
+        continue;
+      }
+      chips[group].forEach(k => {
+        const keys = MR_GROUP_KEYS[group];
+        const on = keys.find(key => vals[key].includes(k));
+        const c = document.createElement("button");
+        c.type = "button";
+        c.className = "mr-chip" + (on ? " on" : "") + (on && on.startsWith("exclude_") ? " neg" : "");
+        c.textContent = k;
+        c.title = on ? "Remove from the rule" : "Add to the rule";
+        c.addEventListener("click", () => on ? remove(on, k) : add(keys[0], k));
+        box.appendChild(c);
+      });
+    }
+  }
+  // typing + Enter adds a pill (never submits the form)
+  Object.entries(rows).forEach(([key, row]) => {
+    const inp = $(".mr-add", row);
+    inp.addEventListener("keydown", e => {
+      if (e.key === "Enter") { e.preventDefault(); add(key, inp.value); inp.value = ""; }
+    });
+  });
+  if (attachmentHint != null) {
+    $(".mr-att-hint", root).textContent =
+      `this email: ${attachmentHint} document${attachmentHint === 1 ? "" : "s"}`;
+  }
+
+  async function loadSuggestions(includeBody) {
+    if (!suggest) return;
+    if (includeBody) { bodyState = "loading"; renderChips(); }
+    let res;
+    try { res = await suggest(includeBody); } catch (e) { res = { ok: false, error: String(e) }; }
+    if (res && res.ok) {
+      chips.sender = res.sender || []; chips.subject = res.subject || [];
+      if (includeBody) {
+        chips.body = res.body || [];
+        bodyState = res.body_error ? "error" : "done";
+        chips.bodyError = res.body_error;
+      }
+    } else if (includeBody) { bodyState = "error"; chips.bodyError = res && res.error; }
+    renderChips();
+  }
+
+  const api_ = {
+    set(e) {
+      e = e || {};
+      for (const key of Object.keys(vals)) vals[key] = asList(e[key]);
+      Object.keys(vals).forEach(renderPills);
+      att.value = e.attachments || "";
+      renderChips();
+    },
+    // the rule as entered, including text typed but not yet Enter-ed
+    value() {
+      const out = {};
+      for (const [key, row] of Object.entries(rows)) {
+        const pending = $(".mr-add", row).value.trim();
+        out[key] = pending && !vals[key].includes(pending) ? [...vals[key], pending] : [...vals[key]];
+      }
+      if (att.value) out.attachments = att.value;
+      return out;
+    },
+    clearInputs() { $$(".mr-add", root).forEach(i => { i.value = ""; }); },
+    showSuggestions(on) { sugBox.hidden = !on || !suggest; },
+    loadBody() { if (bodyState === "idle") loadSuggestions(true); },
   };
+  api_.set(entry);
+  if (suggest) loadSuggestions(false);
+  return api_;
 }
+
+const hasAnchor = m => asList(m.sender_contains).length + asList(m.subject_contains).length > 0;
 
 // ---- the fallback form ---------------------------------------------------
 const FB_NEWCAT = "__new__";
@@ -637,6 +780,11 @@ function syncFieldsForKind(form) {
   const show = (sel, on) => { const el = $(sel, form); if (el) el.hidden = !on; };
 
   $(".f-cat-name", form).hidden = !isNew;
+  $$(".opt", form).forEach(o =>
+    o.classList.toggle("is-selected", !!$(`input[name=kind][value="${kind}"]`, o)));
+  // the fields expand directly under the chosen option
+  const slot = $(`input[name=kind][value="${kind}"]`, form)?.closest(".opt")?.querySelector(".opt-slot");
+  if (slot && fields.parentElement !== slot) slot.appendChild(fields);
   fields.hidden = kind === "skip";
   if (fields.hidden) return;
 
@@ -656,6 +804,7 @@ function syncFieldsForKind(form) {
   if (st.dest) st.dest.setDisabled(!!existing);
   st.seller.setSimple(!isNew);
   st.product.setSimple(!isNew);
+  if (st.match) st.match.showSuggestions(kind === "category" || kind === "exclude");
 
   const box = $(".fb-match-existing", form);
   box.hidden = !existing;
@@ -681,7 +830,21 @@ async function wireForm(scope, it, s) {
     value: s.seller, preview: (src, rx) => api().preview_extract(it.message_id, src, rx) });
   st.product = makeNameField($(".fd-product .nf-slot", form), {
     value: s.product, preview: (src, rx) => api().preview_extract(it.message_id, src, rx) });
-  $(".f-sender", form).value = s.match_sender_contains || "";
+  st.match = makeMatchRule($(".fd-match .mr-slot", form), {
+    entry: { sender_contains: s.match_sender_contains },
+    attachmentHint: s.attachment_count,
+    suggest: inclBody => api().keyword_suggestions(it.message_id, inclBody),
+  });
+  // body keywords need the mailbox — fetch only once the user engages with this email
+  ["focusin", "pointerdown"].forEach(ev =>
+    form.addEventListener(ev, () => st.match.loadBody(), { once: true }));
+  // clicking anywhere on an option (not just its radio) selects it
+  $$(".opt", form).forEach(o => o.addEventListener("click", e => {
+    const r = $("input[name=kind]", o);
+    if (r.checked || e.target.closest(".opt-slot, .opt-body, input, button, select, a")) return;
+    r.checked = true;
+    syncFieldsForKind(form);
+  }));
   if (s.kind) {
     const r = form.querySelector(`input[name=kind][value="${s.kind}"]`);
     if (r) r.checked = true;
@@ -725,7 +888,7 @@ async function wireForm(scope, it, s) {
     e.preventDefault();
     let kind = $("input[name=kind]:checked", form).value;
     const decision = { kind };
-    if (kind === "category" || kind === "exclude") decision.match = readMatch(form);
+    if (kind === "category" || kind === "exclude") decision.match = st.match.value();
     if (kind === "category") {
       const pick = $(".f-cat-assign", form).dataset.value;
       if (pick === FB_NEWCAT) {
@@ -745,7 +908,7 @@ async function wireForm(scope, it, s) {
       decision.seller = { value: st.seller.value };
       decision.product = { value: st.product.value };
     }
-    if (decision.match && !decision.match.sender_contains && !decision.match.subject_contains) {
+    if (decision.match && !hasAnchor(decision.match)) {
       toast("The match rule needs a sender or subject condition", true); return;
     }
     if ((decision.kind === "new_category" || kind === "once")
@@ -1382,9 +1545,10 @@ function catRowEl(cat) {
       row.append(span, del);
       box.appendChild(row);
     });
+    const rule = makeMatchRule($(".cat-add-match .mr-slot", editor), {});
     $(".cat-add-match-btn", editor).addEventListener("click", async () => {
-      const m = readMatch(editor);
-      if (!m.sender_contains && !m.subject_contains) {
+      const m = rule.value();
+      if (!hasAnchor(m)) {
         toast("A rule needs a sender or subject condition", true); return;
       }
       catAfterWrite(await api().category_add_match(cat.id, m), "Rule added");
