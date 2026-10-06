@@ -3,7 +3,28 @@ import tempfile
 import unittest
 from pathlib import Path
 
-import categories as C
+import rules as C
+
+
+def as_data(cats: list) -> dict:
+    """Test helper: the old category-list fixtures as rules.json data — every
+    distinct destination becomes a root, every category a rule pointing at it."""
+    data = {"roots": [], "rules": []}
+    ids = {}
+    for c in cats:
+        dest = c.get("destination")
+        if dest and dest not in ids:
+            ids[dest] = f"root{len(ids)}"
+            data["roots"].append({"id": ids[dest], "name": dest, "folder": dest, "color": "#fff"})
+        rule = {k: v for k, v in c.items() if k != "destination"}
+        rule["root"] = None if c.get("exclude") or not dest else ids[dest]
+        data["rules"].append(rule)
+    return data
+
+
+def match_category(sender, subject="", body="", categories=None, attachment_count=None):
+    return C.match_rule(sender, subject, body, data=as_data(categories),
+                        attachment_count=attachment_count)
 
 R = r"C:\Users\ofeks\OneDrive\Documents\קבלות"
 FIXED = lambda v: {"mode": "fixed", "value": v}
@@ -37,7 +58,7 @@ CATS = [
 
 class TestMatchCategory(unittest.TestCase):
     def m(self, sender, subject="", body=""):
-        return C.match_category(sender, subject, body, categories=CATS)
+        return match_category(sender, subject, body, categories=CATS)
 
     def test_sender_only_match_returns_seller_product_destination(self):
         self.assertEqual(
@@ -77,7 +98,7 @@ class TestMatchCategory(unittest.TestCase):
     def test_first_category_wins(self):
         cats = [dict(CATS[0], id="a", seller=FIXED("first")),
                 dict(CATS[0], id="b", seller=FIXED("second"))]
-        self.assertEqual(C.match_category("x@iec.co.il", categories=cats)[0], "first")
+        self.assertEqual(match_category("x@iec.co.il", categories=cats)[0], "first")
 
     def test_no_match_returns_none(self):
         self.assertIsNone(self.m("someone@nowhere.org", "hi"))
@@ -85,12 +106,12 @@ class TestMatchCategory(unittest.TestCase):
     def test_body_whitespace_normalised(self):
         cats = [dict(CATS[4], match=[{"sender_contains": "payngo.co.il",
                                       "body_contains": "מחסני חשמל"}])]
-        self.assertIsNotNone(C.match_category("x@payngo.co.il", "", "מחסני\xa0\n  חשמל",
+        self.assertIsNotNone(match_category("x@payngo.co.il", "", "מחסני\xa0\n  חשמל",
                                               categories=cats))
 
     def test_missing_destination_defaults_to_receipts_root(self):
         cats = [dict(CATS[1], destination=None)]
-        dest = C.match_category("x@morning.co", "מקס ברנר", categories=cats)[2]
+        dest = match_category("x@morning.co", "מקס ברנר", categories=cats)[2]
         self.assertEqual(dest, C.RECEIPTS_DIR)
 
 
@@ -163,24 +184,6 @@ class TestValidateSpec(unittest.TestCase):
                 C.validate_spec(bad)
 
 
-class TestLoadSave(unittest.TestCase):
-    def test_round_trip(self):
-        with tempfile.TemporaryDirectory() as d:
-            p = Path(d) / "categories.json"
-            C.save_categories(CATS, p)
-            self.assertEqual(C.load_categories(p), CATS)
-            self.assertIn("חשמל", p.read_text(encoding="utf-8"))   # ensure_ascii=False
-
-    def test_missing_file_is_empty_list(self):
-        self.assertEqual(C.load_categories(Path(tempfile.gettempdir()) / "nope-xyz.json"), [])
-
-    def test_corrupt_file_is_empty_list(self):
-        with tempfile.TemporaryDirectory() as d:
-            p = Path(d) / "categories.json"
-            p.write_text("{not json", encoding="utf-8")
-            self.assertEqual(C.load_categories(p), [])
-
-
 class TestHelpers(unittest.TestCase):
     def test_slugify_ascii_and_hebrew_and_dedup(self):
         self.assertEqual(C.slugify("Max Brenner"), "max-brenner")
@@ -188,7 +191,7 @@ class TestHelpers(unittest.TestCase):
         self.assertEqual(C.slugify("Max Brenner", {"max-brenner"}), "max-brenner-2")
 
     def test_query_terms_cover_every_entry_including_excludes(self):
-        terms = C.query_terms(CATS)
+        terms = C.query_terms(as_data(CATS))
         self.assertIn({"sender_contains": "haifa.muni.il", "exclude_subject_contains": []},
                       terms)
         self.assertIn({"sender_contains": "shop.example",
@@ -197,12 +200,12 @@ class TestHelpers(unittest.TestCase):
 
     def test_query_terms_dedup(self):
         cats = [CATS[0], CATS[0]]
-        self.assertEqual(len(C.query_terms(cats)), 2)
+        self.assertEqual(len(C.query_terms(as_data(cats))), 2)
 
     def test_query_terms_one_per_sender_fragment_with_all_exclusions(self):
         cats = [{"id": "x", "match": [{"sender_contains": ["onecity.co.il", "חיפה"],
                                        "exclude_subject_contains": ["פרסומת", "מבצע"]}]}]
-        self.assertEqual(C.query_terms(cats), [
+        self.assertEqual(C.query_terms(as_data(cats)), [
             {"sender_contains": "onecity.co.il", "exclude_subject_contains": ["פרסומת", "מבצע"]},
             {"sender_contains": "חיפה", "exclude_subject_contains": ["פרסומת", "מבצע"]}])
 
@@ -214,7 +217,7 @@ class TestListConditionsAndAttachments(unittest.TestCase):
                  "match": [dict({"sender_contains": "shop.co.il"}, **m)]}]
 
     def m(self, cats, subject="", body="", n=None, sender="a@shop.co.il"):
-        return C.match_category(sender, subject, body, categories=cats, attachment_count=n)
+        return match_category(sender, subject, body, categories=cats, attachment_count=n)
 
     def test_all_listed_subject_words_required(self):
         cats = self.cats(subject_contains=["קבלה", "הזמנה"])

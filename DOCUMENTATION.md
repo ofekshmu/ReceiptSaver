@@ -77,9 +77,9 @@ YYYY_MM_DD - Seller Name - Product Description - [account]
 | `version.py` | Single source of the app version string shown next to the wordmark. Bump `__version__`; `full_version()` appends the short git commit |
 | `install_startup.py` | Registers/removes the `ReceiptSaverUI` logon task (`--uninstall`). The task action is `pythonw app.py --autostart` — that flag is what tells `app.py` to scan immediately instead of opening idle. Uses PowerShell `Register-ScheduledTask` (no admin needed) and clears any leftover Startup-folder launcher |
 | `history.py` | Append-only `history.json` store — one record per handled mail, backs the History view. `append` (dedup by `id`), `update` (patch matching rows only), `upsert` (patch if present, else append — used for fallback resolutions) |
-| `fallback_ops.py` | Heuristic `suggest()` for unresolved fallbacks (sender + subject only; reuses a category that already knows the sender) + `apply_decision()` (`category` / `new_category` / `once` / `exclude` / `skip`): creates or extends a category in `categories.json`, moves the folder out of `_לטיפול ידני`, marks `fallback_log.json` resolved, and upserts a `RESOLVED` history row (created from the fallback entry if no scan-time row exists). See [Applying a fallback decision](#startup-ui-apppy) |
-| `receipt_roots.py` | Discovers every destination root — main `קבלות`, the fallback dir, Japanologia, plus every category `destination` that isn't already inside one of those (a destination nested in another folds into the outermost one) — and guards `Api.browse` against filesystem access outside them. Backs the Receipts tab |
-| `categories.py` | A *category* is a complete filing recipe: it **matches** incoming mail (OR-list `match[]` of `{sender_contains, subject_contains, exclude_subject_contains, body_contains}`) and says **where** the receipt goes (one full `destination` folder) and **how** it is named (`seller` / `product` specs: fixed text, a regex extraction from the subject / body / sender name with an optional fallback, or `null` = the app's suggestion). `match_category()` returns `(seller, product, destination)` / `(EXCLUDE, None, None)` / `None`; first matching category wins. Also `resolve_spec`, `extract`, `validate_spec`, `query_terms()` (the providers' mailbox search terms) and the CRUD helpers behind the Categories tab. See [categories.json Format](#categoriesjson-format) |
+| `fallback_ops.py` | Heuristic `suggest()` for unresolved fallbacks (sender + subject only; pre-selects the rule — and its root — that already knows the sender, else a root matching a subject keyword, else `קבלות`) + `apply_decision()` (`rule` / `new_rule` / `once` / `exclude` / `skip`): extends a rule or creates one (optionally in a new root) in `rules.json`, moves the folder out of `_לטיפול ידני`, marks `fallback_log.json` resolved, and upserts a `RESOLVED` history row (created from the fallback entry if no scan-time row exists). See [Applying a fallback decision](#startup-ui-apppy) |
+| `receipt_roots.py` | Discovers every destination root for the Receipts explorer — main `קבלות`, the fallback dir, Japanologia, plus every root folder in `rules.json` that isn't already inside one of those (a folder nested in another folds into the outermost one) — and guards `Api.browse` against filesystem access outside them |
+| `rules.py` | **Rules** identify a mail type — how it's matched (OR-list of alternatives, each `{sender_contains, subject_contains, exclude_subject_contains, body_contains, exclude_body_contains, attachments}`) and how its seller / product are named (fixed text, a regex extraction from subject / body / sender name with a fallback, or `null` = the app's suggestion). **Roots** are the few places receipts go (name, folder, pastel colour); every non-exclude rule points at one root. `match_rule()` returns `(seller, product, folder)` / `(EXCLUDE, None, None)` / `None`; first matching rule wins. Also the spec helpers (`resolve_spec`, `extract`, `validate_spec`), `query_terms()` for the mailbox searches, and the root / rule CRUD helpers behind the Rules tab. See [rules.json Format](#rulesjson-format) |
 | `naming.py` | The app's default seller/product guess from the sender + subject only (seller from the registered domain, product from subject keywords). Shared by the scan engine (unset or missed seller/product) and the Fallbacks form prefill |
 | `keywords.py` | Keyword chips for building a match rule from one email: `suggest(sender, subject, body)` → sender (domain, address, display name), subject (separator-split phrases + words) and body (known receipt cues such as `מספר הזמנה` first, then frequent 1–4-word phrases). Tokens with 2+ digits (IDs, dates, amounts) and filler words are never offered, and every keyword is a verbatim slice of the email so it is guaranteed to match it |
 | `ui_state.py` | Persists small window UI preferences (`hidden_roots`, `fallbacks_simple`, `rx_sort`) to `ui_state.json` (atomic write) |
@@ -98,14 +98,14 @@ YYYY_MM_DD - Seller Name - Product Description - [account]
 | `test_receipt_saver.py` | Unit tests for `parse_date()`, the structured record shape, and `main()`'s progress callback |
 | `test_history.py` | Unit tests for `history.py` (append/dedup/update/page) |
 | `test_fallback_ops.py` | Unit tests for `suggest()` and `apply_decision()` |
-| `test_categories.py` / `test_categories_mutations.py` / `test_naming.py` / `test_keywords.py` / `test_migrate_categories_v2.py` | Unit tests for category matching + seller/product resolution, the CRUD helpers, the naming heuristic, the keyword extractor, and the v2 migration + its verifier |
+| `test_rules.py` / `test_rules_conditions.py` / `test_naming.py` / `test_keywords.py` / `test_migrate_rules_v3.py` | Unit tests for rules + roots (matching, roots/rules CRUD), the condition and naming-spec engine, the naming heuristic, the keyword extractor, and the v3 migration + its verifier |
 | `test_claude_handoff.py` | Unit tests for the Claude handoff prompt builder |
 | `test_app_api.py` | Unit tests for the `app.Api` data methods and scan orchestration |
 | `japanologia_backfill.py` | One-time script — backfills Japanese lesson attachments since April 15, 2026 |
 | `backfill_fallback_history.py` | One-off — writes `RESOLVED` history rows for fallbacks resolved before `history.upsert` existed (walks `fallback_log.json` for `resolved: true`, skips messages already in `history.json`). `--dry-run` to preview. Idempotent |
-| `migrate_categories_v2.py` | One-off, reversible — `categories.json` v1 (`base_dir` + `subfolder`, string seller/product, per-rule overrides) → v2 (one `destination`, seller/product specs). `product_body_regex` becomes a body extraction with the old static product as its fallback; exclude categories fold into the shared `excluded` category greedily, only where that doesn't change routing. Dry run by default, with an equivalence check of old vs new (seller, product, destination) over every sender/subject in `history.json` + `fallback_log.json` plus a synthetic hit per rule; refuses `--apply` on any difference. `--apply` backs v1 up to `categories.v1.json`. **Applied 2026-10-05** (34 → 31 categories, 112 cases identical). The earlier v0→v1 `migrate_rules_to_categories.py` was retired (it's in git history) |
-| `categories.json` | The categories (see `categories.py`) — grows as you file fallbacks; edited in the **Categories** tab |
-| `custom_rules.legacy.json` / `categories.v1.json` | Pre-migration backups of the old rule formats. Nothing reads them any more |
+| `migrate_rules_v3.py` | One-off, reversible — `categories.json` (v2: one category per mail type, each with its own destination) → `rules.json` (roots + rules). Every distinct destination becomes a root (named after its folder; `<ancestor> › <name>` when two would clash, e.g. `קבלות › חשמל` vs `שלום שבאזי 7 › חשמל`), every category a rule pointing at its root. Dry run by default with an equivalence check of old vs new (seller, product, folder) over History + the fallback log + a synthetic hit per alternative; refuses `--apply` on any difference. `--apply` writes `rules.json` and renames `categories.json` → `categories.v2.json`. **Applied 2026-10-07** (32 categories → 12 roots + 32 rules, 115 cases identical). The earlier `migrate_categories_v2.py` / `migrate_rules_to_categories.py` are retired (in git history) |
+| `rules.json` | Roots + rules (see `rules.py`) — grows as you file fallbacks; edited in the **Rules** tab |
+| `custom_rules.legacy.json` / `categories.v1.json` / `categories.v2.json` | Backups of the earlier formats (flat rules, categories v1, categories v2). Nothing reads them any more |
 | `fallback_log.json` | Log of all unrecognized emails |
 | `processed_ids.json` | Tracks every email already seen — prevents duplicates |
 | `receipt_saver.log` | Full activity log with timestamps, full paths, and saved filenames |
@@ -161,8 +161,8 @@ Every email found in Gmail goes through the following pipeline:
         ┌────────────────────────────┐
         │  ICOUNT PATH               │
         │  • Create folder in קבלות  │
-        │    (or the category's      │
-        │    destination)            │
+        │    (or the rule's root     │
+        │    folder)                 │
         │  • Save email.pdf          │
         │  • NO attachments saved    │
         │  • TickTick task (medium   │
@@ -180,7 +180,7 @@ Every email found in Gmail goes through the following pipeline:
                      ▼
            ┌─────────────────────┐
            │  Matches a          │
-           │  CATEGORY?          │──── YES ──→ KNOWN PATH (see below)
+           │  RULE?              │──── YES ──→ KNOWN PATH (see below)
            └─────────┬───────────┘
                      │ NO
                      ▼
@@ -201,8 +201,8 @@ Every email found in Gmail goes through the following pipeline:
 KNOWN PATH:
         ┌────────────────────────────┐
         │  • Create folder in קבלות  │
-        │    (or the category's      │
-        │    destination)            │
+        │    (or the rule's root     │
+        │    folder)                 │
         │  • Save all attachments    │
         │  • Save email.pdf          │
         │  • Mark as processed       │
@@ -239,14 +239,15 @@ These are permanent rules that never need updating:
 | `stripe.com` | Extracted from subject | מנוי | — | Stripe-powered subscriptions |
 | `icount.co.il` | Extracted from subject | חשבונית מס קבלה | — | **Special handling** — see iCount section |
 
-### Categories (in categories.json)
+### Rules (in rules.json)
 
-Managed in the app's **Categories** tab, and grown by filing fallbacks. The
-table below is the set migrated from the old `custom_rules.json`; since the
-2026-10-05 remodel each category has a single destination folder (the old
-*Category* sub-folder and *Base Dir* columns combined), and the excluded
-senders live in the shared `excluded` category (except the `sternum-sec.com`
-one, which must stay after the salary category to keep routing identical):
+Managed in the app's **Rules** tab, and grown by filing fallbacks. The table
+below is the set migrated from the old `custom_rules.json`; since the
+2026-10-07 remodel each row is a **rule** filing into a **root** (the old
+*Category* sub-folder and *Base Dir* columns combined into the root's folder —
+12 roots in all), and the excluded senders live in the shared `excluded` rule
+(except the `sternum-sec.com` one, which must stay after the salary rule to keep
+routing identical):
 
 | Sender Domain | Subject Contains | Seller | Product | Category | Base Dir |
 |---------------|-----------------|--------|---------|----------|----------|
@@ -376,26 +377,28 @@ belt-and-suspenders guarantee that no horizontal scrollbar can appear.
 |------|---------------|
 | **This run** | On a manual launch, opens idle with a **"Run scan"** button (no scan happens until it's clicked, the titlebar ⟲ is pressed, or the tray's "Run scan now" is used); on an `--autostart` login launch, the scan starts immediately and this tab shows it live. Live results: a card per handled mail, plus a **per-account status list** (`ofek ✓ · yuval ✓ · sternum ⚠ needs re-authorization …`) driven by `connecting` / `account` / `error` / `done` events — so a slow or failing account is visible immediately instead of the view looking stuck. The scan always resolves to a definite sentence — `Scan complete — N new receipts saved` / `…no new mail found` / `Scan stopped early — see errors above`; re-opening the tab reconciles it from `Api.get_run()`. Each surfaced error (scan-error rows and error toasts) carries an **Ask Claude** button (Claude-mark icon) — it calls `Api.ask_claude_error(text)`, which opens a `claude` terminal in the repo pre-seeded to debug that error. |
 | **History** | Every mail handled since the UI shipped, newest first, lazy-loaded on scroll, with a text filter over sender/subject/seller. Backed by `history.json`. Resolved-fallback rows show `· resolved <date> by you/Claude/backfill`. The card's folder link (shared `#tpl-card`, so **This run** too) is the icon-only outlined-folder glyph, not an "Open folder" text link. |
-| **Fallbacks** | Unresolved `fallback_log.json` entries (badge shows the count). Each row has a form pre-filled by `fallback_ops.suggest` (sender + subject only — no body, no network, no AI; a category that already knows the sender is preselected). Four options: **File under a category** / **Exclude as promotional** / **Move this one only** / **Skip**, then **Apply**. The fields block expands **directly under the selected option** (it is moved into that option's `.opt-slot`; clicking anywhere on an option selects it). **File under a category** shows the categories as a **grid of pastel tiles** (`.cat-picker.f-cat-assign`, built by `makeCatGrid`): the first tile is always **＋ New category** (dashed outline), then one tile per non-excluded category with its name, its folder (`קבלות › חשבנות › חשמל`, full path on hover) and `seller · N rules`. Each category gets a fixed colour from an 8-hue pastel palette (`PASTELS`, picked by a hash of its id, so it never changes). The selected tile gets an accent ring and a ✓ corner badge. The **Search categories…** box above filters tiles live by name, folder, seller or sender domain (＋ New stays visible; "No category matches" when nothing does); Enter picks the first match. The grid shows at most three rows and scrolls inside itself beyond that; a pre-selected category (one that already knows the sender) is scrolled into view only if it's below the fold. Picking a tile also switches the option to **File under a category**. The fields block (`.fb-fields`, contextual heading `.fb-fields-head`) changes with the choice: **New category** — name, **Destination**, **Seller**, **Product** and a **Match rule**, all editable; **existing category** — destination pinned to the category, Seller/Product prefilled with what *this mail* resolves to under that category (`Api.preview_category`; editable as a one-off for this mail, the category's settings stay as they are), its current rules listed read-only plus one new rule row that gets added; **Move this one only** — destination + plain seller/product, no rule; **Exclude** — the match rule only (sender prefilled; add e.g. a subject condition to narrow it); **Skip** — nothing. **Destination** is a searchable combobox (`makeDestPicker`): **📁 Browse…** pinned first (`Api.pick_folder` → the Windows folder dialog, which can also create a new folder), then every folder from `Api.destination_suggestions` — category destinations + folders History filed into + every root (never `_לטיפול ידני`), most-used first, shown compactly as `קבלות › חשבנות › חשמל` with the full path on hover. The **Match rule** is a widget (`#tpl-matchrule`, `makeMatchRule`): one pill list per condition — *Sender contains*, *Subject contains*, *Subject must NOT contain*, *Body contains*, *Body must NOT contain* (type + Enter adds a pill; text typed but not Enter-ed is still included on Apply) — plus an **Attachments** select (Any / None / Exactly 1 / More than 1, with a *this email: N documents* hint; images such as logos don't count). Below it, **keyword chips** from `Api.keyword_suggestions` in three groups — Sender / Subject / Body: click a chip to add it to the matching condition (click again to remove); **≠** on a subject/body pill flips it between *contains* and *must NOT contain*. Sender and subject chips appear at once; body chips need the mail text, so they load the first time you click or focus inside that email's form. Chips show for a new category, Exclude, and the rule added to an existing category. **Seller** / **Product** each use the same widget (`#tpl-namefield`, `makeNameField`): a value prefilled with the app's suggestion, a **Use for every mail** tick (ticked → saved on the category as fixed text; unticked → this mail only, future mails get the app's suggestion) and **⚙ Extract** — pick Subject / Body / Sender name and type a regex; the value box becomes *If no match* and a live preview (`Api.preview_extract`, run in Python so it behaves exactly like the scan) shows the result, a miss, or a regex error. The Body source fetches the mail text from Gmail/Outlook by message id on first use and caches it for the session. Multi-select + the icon-only **Claude-mark → button** (`#fb-handoff`) opens a pre-seeded `claude` terminal for the hard ones; each row also has its own icon-only Claude button (`fallbackClaudeButton`) and an icon-only outlined-folder link. A **Simple view** toggle collapses every entry to a one-line row (subject + `sender · account · date` + confidence); click a row to expand its full form. The toggle persists in `ui_state.json`. |
-| **Categories** | Every category in `categories.json`, one row each: name, a summary (`destination · seller: … · product: …`, where each is the fixed text, `from subject/body/sender name`, or `app suggestion`), the rule count, **merge into…** (moves this category's rules into another; the target's destination and naming apply from then on), **Save** and **✕**. **▸** expands an editor with the same Destination picker and Seller/Product widgets as the Fallbacks form (no preview — there's no mail to test against; an invalid regex is rejected on Save), the match rules (each removable) and an **Add rule** row — the same match-rule widget as the Fallbacks form (pill lists + attachments), without keyword chips. **Add category** creates one filing into `קבלות` with no rules yet. The shared `excluded` category (and any other exclude category) shows only its rules. |
-| **Receipts** | Read-only explorer. Left rail lists every destination root (`receipt_roots.discover_roots` — main `קבלות`, `_לטיפול ידני`, Japanologia, and every category destination outside those; roots not yet created are dimmed), each entry separated from the next by a faded divider line. The right pane is a breadcrumb navigator over the selected root: click a folder to descend, a crumb to jump to an ancestor, the **‹** button (or **Alt+←**) to step back through visited folders, double-click a file to open it in its default app, or the outlined-folder icon button to open the current folder in Windows Explorer (an inline SVG using `currentColor`, so it matches the app's palette exactly instead of the mismatched colors of a Windows folder emoji). The breadcrumb trail stays on one line — a crumb too long for the available width is clipped with an ellipsis, and hovering any crumb (or a row) shows its full path in a native tooltip. Two **sort** buttons in the toolbar toggle the field (**Name** / **Date**) and direction (**↑** / **↓**); folders always sort before files, the choice persists in `ui_state.json` (`rx_sort`, default `date_desc`), and Date order uses the `YYYY_MM_DD` prefix of dated folders, otherwise the filesystem mtime. Dated `YYYY_MM_DD - Seller - Product - label` folders are parsed for display: each row shows the cleaned **Seller - Product** title, a human date (`25 Aug 2026`) and an account chip, with a 📁 folder glyph (they're still real folders — one PDF, occasionally more, inside; glyphs are desaturated with CSS `grayscale` to match the app's monochrome look), each in a shaded box. Plain folders and files show their raw name. A search box at the top runs `Api.search_receipts` — a recursive, depth-capped walk of **every** root — once 2+ characters are typed, and lists matches as `root / relative\path`; clearing it back below 2 characters restores the plain (non-recursive) current-folder listing. Clicking a folder in the results leaves search mode and navigates into that folder — `rxExitSearch({ noBrowse: true })` suppresses its usual re-browse of the pre-search folder so the two navigations don't race (the stale re-browse used to win and snap you back to where you searched from); the Back button while searching uses the same guard. Any root can be hidden with its `⊘` button (it moves to a **Hidden** section) and restored with `＋`; the set persists in `ui_state.json`. **Right-click any row** for a one-item **Ask Claude** menu that opens a `claude` terminal seeded with a prompt about that entry (see *Capabilities with Claude → Right-click an explorer entry*). No writes — `Api.browse` refuses any path outside the known roots. |
+| **Fallbacks** | Unresolved `fallback_log.json` entries (badge shows the count). Each row has a form pre-filled by `fallback_ops.suggest` (sender + subject only — no body, no network, no AI; the rule that already knows the sender, and its root, are pre-selected). Four options: **File under a root** / **Exclude as promotional** / **Move this one only** / **Skip**, then **Apply**. The fields block expands **directly under the selected option** (it is moved into that option's `.opt-slot`; clicking anywhere on an option selects it). **File under a root** shows the roots as a **grid of pastel tiles** (`.cat-picker.f-root-pick`, built by `makeTileGrid`): the first tile is always **＋ New root** (dashed outline), then one tile per root in its own colour with its name, its folder (`קבלות › חשבנות › חשמל`, full path on hover) and its rule names + `N rules`. The selected tile gets an accent ring and a ✓ corner badge. The **Search roots and rules…** box filters tiles live by root name or folder **and** by the rules inside (rule name, seller, sender — typing `iec` finds the electricity roots); ＋ New stays visible, "No root matches" when nothing does; Enter picks the first match. The grid shows at most three rows and scrolls inside itself; a pre-selected root is scrolled into view only if it's below the fold. Picking a tile also switches the option to **File under a root**. Under the grid, **rule chips** (`.rule-chips`): **＋ New rule** (default) then that root's rules — the sender's known rule is pre-selected. The fields block (`.fb-fields`, contextual heading `.fb-fields-head`) changes with the choice: **＋ New rule** — an optional rule name (defaults to the seller), **Seller**, **Product** and a **Match rule**, all editable (plus a root name and **New root's folder** when the root is ＋ New root too); **existing rule** — Seller/Product prefilled with what *this mail* resolves to under that rule (`Api.preview_rule`; editable as a one-off for this mail, the rule's settings stay as they are), its current alternatives listed read-only and this email's conditions added as another alternative; **Move this one only** — destination + plain seller/product, nothing remembered; **Exclude** — the match rule only (sender prefilled; add e.g. a subject condition to narrow it); **Skip** — nothing. **Destination** (new root's folder / move once) is a searchable combobox (`makeDestPicker`): **📁 Browse…** pinned first (`Api.pick_folder` → the Windows folder dialog, which can also create a new folder), then every folder from `Api.destination_suggestions` — root folders + folders History filed into + every receipt root (never `_לטיפול ידני`), most-used first, shown compactly as `קבלות › חשבנות › חשמל` with the full path on hover. The **Match rule** is a widget (`#tpl-matchrule`, `makeMatchRule`): one pill list per condition — *Sender contains*, *Subject contains*, *Subject must NOT contain*, *Body contains*, *Body must NOT contain* (type + Enter adds a pill; text typed but not Enter-ed is still included on Apply) — plus an **Attachments** select (Any / None / Exactly 1 / More than 1, with a *this email: N documents* hint; images such as logos don't count). Below it, **keyword chips** from `Api.keyword_suggestions` in three groups — Sender / Subject / Body: click a chip to add it to the matching condition (click again to remove); **≠** on a subject/body pill flips it between *contains* and *must NOT contain*. Sender and subject chips appear at once; body chips need the mail text, so they load the first time you click or focus inside that email's form. Chips show for a new rule, an existing rule's new alternative, and Exclude. **Seller** / **Product** each use the same widget (`#tpl-namefield`, `makeNameField`): a value prefilled with the app's suggestion, a **Use for every mail** tick (ticked → saved on the rule as fixed text; unticked → this mail only, future mails get the app's suggestion) and **⚙ Extract** — pick Subject / Body / Sender name and type a regex; the value box becomes *If no match* and a live preview (`Api.preview_extract`, run in Python so it behaves exactly like the scan) shows the result, a miss, or a regex error. The Body source fetches the mail text from Gmail/Outlook by message id on first use and caches it for the session. Multi-select + the icon-only **Claude-mark → button** (`#fb-handoff`) opens a pre-seeded `claude` terminal for the hard ones; each row also has its own icon-only Claude button (`fallbackClaudeButton`) and an icon-only outlined-folder link. A **Simple view** toggle collapses every entry to a one-line row (subject + `sender · account · date` + confidence); click a row to expand its full form. The toggle persists in `ui_state.json`. |
+| **Rules** | Every rule in `rules.json`, **grouped by root**. A **search** box filters rules by name, seller, sender or any condition, and groups by root name / folder. Each group header shows the root's colour, name, folder and rule count with **＋ New rule** (adds an empty rule in this root — expand it to add match alternatives), **Edit** (rename, change the folder with the destination picker, pick a colour from the pastel swatches) and **✕** (an empty root is deleted after a confirm; a root that still has rules asks which root to move them to first — the folder on disk is never touched). **＋ New root** in the tab header opens the same editor. Rule rows show the name, a summary (`seller: … · product: … · N alternatives`, where each is the fixed text, `from subject/body/sender name`, or `app suggestion`), a **root** select (moves the rule), **merge into…** (another rule of the same root takes over its alternatives), **Save** and **✕**. **▸** expands an editor with the Seller/Product widgets (no preview — there's no mail to test against; an invalid regex is rejected on Save), the match alternatives (each removable) and an **Add alternative** row — the same match-rule widget as the Fallbacks form, without keyword chips. Exclude rules sit in a final **Excluded** group (no root, alternatives only); rules whose root is missing show under **No root** and file into `קבלות`. |
+| **Receipts** | Read-only explorer. Left rail lists every destination root (`receipt_roots.discover_roots` — main `קבלות`, `_לטיפול ידני`, Japanologia, and every root folder from rules.json outside those; roots not yet created are dimmed), each entry separated from the next by a faded divider line. The right pane is a breadcrumb navigator over the selected root: click a folder to descend, a crumb to jump to an ancestor, the **‹** button (or **Alt+←**) to step back through visited folders, double-click a file to open it in its default app, or the outlined-folder icon button to open the current folder in Windows Explorer (an inline SVG using `currentColor`, so it matches the app's palette exactly instead of the mismatched colors of a Windows folder emoji). The breadcrumb trail stays on one line — a crumb too long for the available width is clipped with an ellipsis, and hovering any crumb (or a row) shows its full path in a native tooltip. Two **sort** buttons in the toolbar toggle the field (**Name** / **Date**) and direction (**↑** / **↓**); folders always sort before files, the choice persists in `ui_state.json` (`rx_sort`, default `date_desc`), and Date order uses the `YYYY_MM_DD` prefix of dated folders, otherwise the filesystem mtime. Dated `YYYY_MM_DD - Seller - Product - label` folders are parsed for display: each row shows the cleaned **Seller - Product** title, a human date (`25 Aug 2026`) and an account chip, with a 📁 folder glyph (they're still real folders — one PDF, occasionally more, inside; glyphs are desaturated with CSS `grayscale` to match the app's monochrome look), each in a shaded box. Plain folders and files show their raw name. A search box at the top runs `Api.search_receipts` — a recursive, depth-capped walk of **every** root — once 2+ characters are typed, and lists matches as `root / relative\path`; clearing it back below 2 characters restores the plain (non-recursive) current-folder listing. Clicking a folder in the results leaves search mode and navigates into that folder — `rxExitSearch({ noBrowse: true })` suppresses its usual re-browse of the pre-search folder so the two navigations don't race (the stale re-browse used to win and snap you back to where you searched from); the Back button while searching uses the same guard. Any root can be hidden with its `⊘` button (it moves to a **Hidden** section) and restored with `＋`; the set persists in `ui_state.json`. **Right-click any row** for a one-item **Ask Claude** menu that opens a `claude` terminal seeded with a prompt about that entry (see *Capabilities with Claude → Right-click an explorer entry*). No writes — `Api.browse` refuses any path outside the known roots. |
 
 **Applying a fallback decision** (`fallback_ops.apply_decision`):
 
-The form sends `{kind, category_id | category_name, destination, seller,
-product, match}`, where `seller` / `product` are `{value, every_mail, extract}` —
-`value` is always what *this* mail's folder is named with; `every_mail` /
-`extract` only shape what a **new** category remembers.
+The form sends `{kind, rule_id | rule_name + (root_id | new_root {name, folder}),
+destination, seller, product, match}`, where `seller` / `product` are
+`{value, every_mail, extract}` — `value` is always what *this* mail's folder is
+named with; `every_mail` / `extract` only shape what a **new** rule remembers.
 
-- `new_category` — create a category (destination, seller/product specs from the
-  tick / extraction, the match rule), move + rename the folder from
-  `_לטיפול ידני` into the destination, mark resolved, history row `RESOLVED`
-  (`resolution: category`). An invalid regex or a rule with neither a sender nor
-  a subject condition is rejected before anything moves.
-- `category` — add the match rule to an existing category and file into *its*
-  destination (its seller/product settings are left as they are).
-- `once` — move + rename into the chosen destination; no category is written.
-- `exclude` — add the match rule to the shared `excluded` category, delete the
+- `new_rule` — create a rule (seller/product specs from the tick / extraction,
+  the match rule as its first alternative) in an existing root, or in a new root
+  created on the spot; move + rename the folder from `_לטיפול ידני` into the
+  root's folder, mark resolved, history row `RESOLVED` (`resolution: rule`, with
+  `rule_name` / `root_name`). An invalid regex, an unknown root, a new root
+  without a folder, or a match rule with neither a sender nor a subject
+  condition is rejected before anything is written or moved.
+- `rule` — add the match rule as another alternative of an existing rule and
+  file into *its* root (its seller/product settings are left as they are).
+- `once` — move + rename into the chosen destination; no rule is written.
+- `exclude` — add the match rule to the shared `excluded` rule, delete the
   folder, log to `cleanup_log.json`, mark resolved.
 - `skip` — **dismiss**: mark resolved and record `resolution: dismissed` in
   History; the folder stays in `_לטיפול ידני` and nothing is remembered, so a
@@ -472,11 +475,11 @@ The script builds the Gmail query dynamically at runtime:
 )
 ```
 
-The `from:` exceptions are generated automatically from every domain-based `sender_contains` in `categories.json` (`categories.query_terms()`, exclude categories included). Adding a category rule with a domain automatically updates the query — no manual changes needed. The Japanese lesson clause is hardcoded in `build_gmail_query()`, which now lives in `gmail_provider.py` (called via `gmail_provider.list_candidate_ids()`).
+The `from:` exceptions are generated automatically from every domain-based `sender_contains` in `rules.json` (`rules.query_terms()`, exclude rules included). Adding a rule alternative with a domain automatically updates the query — no manual changes needed. The Japanese lesson clause is hardcoded in `build_gmail_query()`, which now lives in `gmail_provider.py` (called via `gmail_provider.list_candidate_ids()`).
 
 **Key behaviors:**
 - Emails with attachments matching subject keywords are always included
-- Known senders (from categories.json) are always included even without attachments — their email body is saved as `email.pdf`
+- Known senders (from rules.json) are always included even without attachments — their email body is saved as `email.pdf`
 - SENT folder is always excluded
 - Looks back 60 days on every run
 - Already-processed email IDs are stored in `processed_ids.json` — each email is processed only once regardless of how many times the script runs
@@ -512,7 +515,7 @@ Trigger this by opening this chat and saying the phrase. You will need to paste 
 3. Classifies each email — is it a receipt? Who is the seller? What is the product?
 4. Presents a classification table for your approval
 5. On approval:
-   - Adds the sender to `categories.json` (or tells you what to enter in the Fallbacks form) so it is recognized automatically next time
+   - Adds the sender to `rules.json` (or tells you what to enter in the Fallbacks form) so it is recognized automatically next time
    - Provides a `move_fallbacks.py` script that renames and moves the folders from `_לטיפול ידני\` to the main `קבלות\` directory with correct names
    - Updates all resolved entries in `fallback_log.json`
 
@@ -522,7 +525,7 @@ You can tell Claude directly to add a rule, for example:
 - *"emails from noreply@bezeq.co.il are receipts from בזק - חשבונית חודשית"*
 - *"emails from amazon.com with 'order' in the subject are from Amazon - הזמנה"*
 
-Claude will update `categories.json` (you can also do it yourself in the **Categories** tab).
+Claude will update `rules.json` (you can also do it yourself in the **Rules** tab).
 
 ### Asking about your receipts
 
@@ -547,40 +550,45 @@ scroll.
 
 ---
 
-## categories.json Format
+## rules.json Format
 
 ```jsonc
-[
-  {
-    "id": "electricity",                       // stable slug
-    "name": "חשמל",                            // display name
-    "destination": "C:\\Users\\ofeks\\OneDrive\\Documents\\קבלות\\חשבנות\\חשמל",
-    "seller":  { "mode": "fixed", "value": "חברת חשמל לישראל" },
-    "product": { "mode": "extract", "source": "body",
-                 "regex": "(תלוש שכר לחודש \\S+ \\d{4})", "fallback": "תלוש שכר" },
-    "exclude": false,
-    "match": [
-      { "sender_contains": "iec.co.il" },
-      { "sender_contains": "onecity.co.il", "subject_contains": ["חשמל", "חשבון"],
-        "exclude_subject_contains": "פרסומת", "body_contains": "מספר חשבון",
-        "exclude_body_contains": "בוטל", "attachments": "one" }
-    ]
-  }
-]
+{
+  "roots": [
+    { "id": "r-חשמל", "name": "קבלות › חשמל",
+      "folder": "C:\\Users\\ofeks\\OneDrive\\Documents\\קבלות\\חשבנות\\חשמל", "color": "#d6efcf" }
+  ],
+  "rules": [
+    {
+      "id": "iec", "name": "חברת חשמל לישראל", "root": "r-חשמל",
+      "seller":  { "mode": "fixed", "value": "חברת חשמל לישראל" },
+      "product": { "mode": "extract", "source": "body",
+                   "regex": "(חשבון לתקופה \\S+)", "fallback": "חשבונית חשמל" },
+      "exclude": false,
+      "match": [
+        { "sender_contains": "iec.co.il" },
+        { "sender_contains": "onecity.co.il", "subject_contains": ["חשמל", "חשבון"],
+          "exclude_subject_contains": "פרסומת", "body_contains": "מספר חשבון",
+          "exclude_body_contains": "בוטל", "attachments": "one" }
+      ]
+    }
+  ]
+}
 ```
 
-- `destination` — the full folder path matched receipts are filed into (`null` → `קבלות`). Several categories may share one (e.g. every electricity provider → `קבלות\חשבנות\חשמל`).
+- **Root** — `name`, `folder` (where its rules file receipts), `color` (one of the 8-hue pastel palette, `rules.PASTELS`; the least-used one is picked for a new root). A root never affects naming.
+- **Rule** — `root` (a root id; `null` for exclude rules; a missing root falls back to `קבלות`).
 - `seller` / `product` — a spec:
   - `{"mode": "fixed", "value": …}` — always this text
   - `{"mode": "extract", "source": "subject" | "body" | "sender_name", "regex": …, "fallback"?: …}` — the first `( )` group of the regex (or the whole match), folder-sanitized; `fallback` when it doesn't match
   - `null` — the app's suggestion (`naming.suggest_names`)
 
   Resolution per mail: fixed → extraction → `fallback` → app suggestion, so a folder name is never empty.
-- `match` — OR-list; a mail matches an entry when **all** its conditions hold. Text conditions take a string or a list of strings: `sender_contains` / `subject_contains` (case-insensitive, **every** listed value must appear), `exclude_subject_contains` (**none** of the values may appear in the subject), `body_contains` / `exclude_body_contains` (the same, case-sensitive, against the whitespace-normalised plain-text body). `attachments` — `"none"` / `"one"` / `"many"` (2+); counts documents only (images such as logos are ignored); omitted = any. Providers report `attachment_count` from attachment names (no download) and fallback entries record it; older fallback entries are counted from their folder. Each entry needs a sender or subject condition. One value is stored as a string, several as a list.
-- `exclude` — `true` silently skips matching mail (no folder, logged as `EXCLUDED`). New exclusions from the Fallbacks form go into the shared `excluded` category.
-- Categories are checked in file order; the first category with a matching entry wins.
+- `match` — OR-list of **alternatives**; a mail matches an alternative when **all** its conditions hold. Text conditions take a string or a list of strings: `sender_contains` / `subject_contains` (case-insensitive, **every** listed value must appear), `exclude_subject_contains` (**none** of the values may appear in the subject), `body_contains` / `exclude_body_contains` (the same, case-sensitive, against the whitespace-normalised plain-text body). `attachments` — `"none"` / `"one"` / `"many"` (2+); counts documents only (images such as logos are ignored); omitted = any. Providers report `attachment_count` from attachment names (no download) and fallback entries record it; older fallback entries are counted from their folder. Each alternative needs a sender or subject condition. One value is stored as a string, several as a list.
+- `exclude` — `true` silently skips matching mail (no folder, logged as `EXCLUDED`). New exclusions from the Fallbacks form go into the shared `excluded` rule.
+- Rules are checked in file order; the first rule with a matching alternative wins.
 
-The hardcoded `KNOWN_RULES` in `receipt_saver.py` still run *before* categories (and still file into `קבלות` sub-folders such as `חשבנות/אינטרנט`); converting them into categories is a planned follow-up.
+The hardcoded `KNOWN_RULES` in `receipt_saver.py` still run *before* `rules.json` (and still file into `קבלות` sub-folders such as `חשבנות/אינטרנט`); converting them into rules is a planned follow-up.
 
 ---
 

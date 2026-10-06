@@ -21,7 +21,7 @@ from pathlib import Path
 import msal
 import requests
 
-import categories
+import rules
 
 log = logging.getLogger("receipt_saver")
 
@@ -89,10 +89,9 @@ def get_service(account: dict, interactive: bool = False) -> dict:
 
 
 def _query_terms() -> list:
-    """`{sender_contains, exclude_subject_contains}` per category match entry."""
+    """`{sender_contains, exclude_subject_contains}` per rule alternative (rules.query_terms)."""
     try:
-        import categories
-        return categories.query_terms()
+        return rules.query_terms()
     except Exception:
         return []
 
@@ -206,7 +205,7 @@ def fetch_message(service, msg_id: str, account: dict) -> dict:
         "body_text": body_text,
         "body_html": body_html,
         "first_attachment_name": first_attachment_name,
-        "attachment_count": categories.count_documents(attachment_names),
+        "attachment_count": rules.count_documents(attachment_names),
         "attachments": lambda: _fetch_attachments(access_token, msg_id),
         "link": _outlook_link(msg_id),
     }

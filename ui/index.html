@@ -14,7 +14,7 @@
       <button data-view="history" class="tab">History</button>
       <button data-view="fallbacks" class="tab">Fallbacks <span id="fb-badge" class="badge" hidden>0</span></button>
       <button data-view="receipts" class="tab">Receipts</button>
-      <button data-view="categories" class="tab">Categories</button>
+      <button data-view="rules" class="tab">Rules</button>
     </nav>
     <div class="win-controls">
       <button id="btn-rescan" title="Run scan now">&#10227;</button>
@@ -82,46 +82,79 @@
       </div>
     </section>
 
-    <section id="view-categories" class="view">
-      <div class="cat-bar">
-        <input id="cat-new-name" type="text" dir="auto" placeholder="New category name…">
-        <button id="cat-new-btn" type="button">Add category</button>
+    <section id="view-rules" class="view">
+      <div class="cat-bar rules-bar">
+        <input id="rules-search" type="search" dir="auto" placeholder="Search rules, roots, senders…">
+        <button id="root-new-btn" type="button">＋ New root</button>
       </div>
-      <div id="cat-list"></div>
-      <div id="cat-empty" class="rx-empty" hidden>No categories yet.</div>
+      <div id="root-new-form" class="root-editor-host" hidden></div>
+      <div id="rules-list"></div>
+      <div id="rules-empty" class="rx-empty" hidden>No rules yet — they're created when you file fallbacks.</div>
     </section>
   </main>
 
-  <template id="tpl-cat">
+  <template id="tpl-root-group">
+    <section class="root-group">
+      <header class="root-head">
+        <span class="root-swatch"></span>
+        <span class="root-name" dir="auto"></span>
+        <span class="root-folder" dir="auto"></span>
+        <span class="root-count"></span>
+        <span class="root-actions">
+          <button type="button" class="root-add-rule" title="Add a rule that files into this root">＋ New rule</button>
+          <button type="button" class="root-edit-btn" title="Rename, change folder or colour">Edit</button>
+          <button type="button" class="root-del" title="Delete this root">✕</button>
+        </span>
+      </header>
+      <div class="root-editor-host" hidden></div>
+      <div class="root-new-rule" hidden>
+        <input class="rn-name" dir="auto" placeholder="New rule name (e.g. the seller)">
+        <button type="button" class="rn-add">Add rule</button>
+      </div>
+      <div class="root-rules"></div>
+    </section>
+  </template>
+
+  <template id="tpl-root-editor">
+    <div class="root-editor">
+      <div class="re-row"><label>Name</label><input class="re-name" dir="auto" placeholder="e.g. חשמל"></div>
+      <div class="re-row"><label>Folder</label>
+        <div class="combo re-folder" data-value="">
+          <input class="combo-input" type="text" dir="auto" autocomplete="off" spellcheck="false"
+                 placeholder="Pick a folder or type to search&hellip;">
+          <ul class="combo-list" hidden></ul>
+        </div>
+      </div>
+      <div class="re-row"><label>Colour</label><div class="re-colors"></div></div>
+      <div class="re-actions">
+        <button type="button" class="re-save">Save</button>
+        <button type="button" class="re-cancel">Cancel</button>
+      </div>
+    </div>
+  </template>
+
+  <template id="tpl-rule">
     <article class="cat" data-id="">
       <div class="cat-row">
-        <button class="cat-expand" title="Edit this category">▸</button>
-        <input class="cat-name" dir="auto" title="Category name">
+        <button class="cat-expand" title="Edit this rule">▸</button>
+        <input class="cat-name" dir="auto" title="Rule name">
         <span class="cat-summary" dir="ltr"></span>
-        <span class="cat-count" title="match rules"></span>
-        <select class="cat-merge" title="Merge this category into another"></select>
+        <select class="rule-root" title="Move this rule to another root"></select>
+        <select class="cat-merge" title="Merge this rule into another rule of the same root"></select>
         <button class="cat-save" title="Save changes">Save</button>
-        <button class="cat-del" title="Delete category">✕</button>
+        <button class="cat-del" title="Delete rule">✕</button>
       </div>
       <div class="cat-editor" hidden>
         <div class="cat-fields">
-          <div class="field fd-dest">
-            <label>Destination</label>
-            <div class="combo f-dest" data-value="">
-              <input class="combo-input" type="text" dir="auto" autocomplete="off" spellcheck="false"
-                     placeholder="Pick a folder or type to search&hellip;">
-              <ul class="combo-list" hidden></ul>
-            </div>
-          </div>
           <div class="field fd-seller"><label>Seller</label><div class="nf-slot"></div></div>
           <div class="field fd-product"><label>Product</label><div class="nf-slot"></div></div>
         </div>
         <div class="field">
-          <label>Match rules <span class="hint">(a mail matches if any rule matches; a rule needs all its conditions)</span></label>
+          <label>Match alternatives <span class="hint">(a mail matches if any alternative matches; an alternative needs all its conditions)</span></label>
           <div class="cat-matches"></div>
           <div class="cat-add-match">
             <div class="mr-slot"></div>
-            <button type="button" class="cat-add-match-btn">Add rule</button>
+            <button type="button" class="cat-add-match-btn">Add alternative</button>
           </div>
         </div>
       </div>
@@ -179,7 +212,7 @@
     <div class="nf">
       <div class="nf-row">
         <input class="nf-value" dir="auto">
-        <label class="nf-every" title="Ticked: every future mail filed by this category gets this name. Unticked: only this mail — future mails get the app's suggestion.">
+        <label class="nf-every" title="Ticked: every future mail matched by this rule gets this name. Unticked: only this mail — future mails get the app's suggestion.">
           <input type="checkbox" class="nf-every-cb" checked> Use for every mail
         </label>
         <button type="button" class="nf-x-toggle"
@@ -255,18 +288,24 @@
           <fieldset class="fb-kinds">
             <legend>What to do with this email</legend>
             <div class="opt">
-              <label class="opt-head"><input type="radio" name="kind" value="category" checked> File under a category</label>
-              <span class="opt-desc">File this email now <b>and</b> remember it: pick an existing category or create a new one, so future emails like it file automatically.</span>
+              <label class="opt-head"><input type="radio" name="kind" value="file" checked> File under a root</label>
+              <span class="opt-desc">File this email now <b>and</b> remember it: pick the root (folder) it belongs in, then an existing rule or a new one, so future emails like it file automatically.</span>
               <div class="opt-body">
-                <div class="cat-picker f-cat-assign" data-value="">
+                <div class="cat-picker f-root-pick" data-value="">
                   <input class="cat-search" type="search" dir="auto" autocomplete="off" spellcheck="false"
-                         placeholder="Search categories&hellip;"
-                         title="Filter by name, folder, seller or sender">
-                  <div class="cat-grid" role="listbox" aria-label="Categories"></div>
-                  <div class="cat-grid-empty" hidden>No category matches &mdash; create a new one.</div>
+                         placeholder="Search roots and rules&hellip;"
+                         title="Filter by root name, folder, rule name, seller or sender">
+                  <div class="cat-grid" role="listbox" aria-label="Roots"></div>
+                  <div class="cat-grid-empty" hidden>No root matches &mdash; create a new one.</div>
                 </div>
-                <input class="f-cat-name" type="text" dir="auto" hidden
-                       placeholder="New category name (e.g. חשמל)">
+                <input class="f-root-name" type="text" dir="auto" hidden
+                       placeholder="New root name (e.g. חשמל)">
+                <div class="rule-pick" hidden>
+                  <span class="rule-pick-lbl">Rule</span>
+                  <div class="rule-chips"></div>
+                </div>
+                <input class="f-rule-name" type="text" dir="auto" hidden
+                       placeholder="New rule name (optional — defaults to the seller)">
               </div>
               <div class="opt-slot"></div>
             </div>

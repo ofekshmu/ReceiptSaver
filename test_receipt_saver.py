@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from receipt_saver import parse_date, unique_folder
-from categories import match_category
+from rules import match_rule as match_category      # live rules.json
 import receipt_saver
 import history as history_mod
 
@@ -67,27 +67,29 @@ class TestUpappRule(unittest.TestCase):
         self.assertIsNone(result)
 
 
-class TestCategoryRouting(unittest.TestCase):
-    """process_message files a category match into its destination."""
+class TestRuleRouting(unittest.TestCase):
+    """process_message files a rule match into its root's folder."""
 
     def setUp(self):
-        import json, categories
+        import json, rules
         self.tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
         self.dest = self.tmp / "bills" / "חשמל"
-        cats_file = self.tmp / "categories.json"
-        cats_file.write_text(json.dumps([
-            {"id": "elec", "name": "חשמל", "destination": str(self.dest),
-             "seller": {"mode": "fixed", "value": "חברת חשמל"},
-             "product": {"mode": "extract", "source": "subject", "regex": r"חשבון (\d+)"},
-             "exclude": False, "match": [{"sender_contains": "iectest.co.il"}]},
-            {"id": "excluded", "name": "(excluded)", "exclude": True, "destination": None,
-             "seller": None, "product": None,
-             "match": [{"sender_contains": "spam.example", "subject_contains": "מבצע"}]},
-        ], ensure_ascii=False), encoding="utf-8")
-        orig = categories.CATEGORIES_FILE
-        categories.CATEGORIES_FILE = cats_file
-        self.addCleanup(setattr, categories, "CATEGORIES_FILE", orig)
+        rules_file = self.tmp / "rules.json"
+        rules_file.write_text(json.dumps({
+            "roots": [{"id": "elec", "name": "חשמל", "folder": str(self.dest), "color": "#fff"}],
+            "rules": [
+                {"id": "elec", "name": "חשמל", "root": "elec",
+                 "seller": {"mode": "fixed", "value": "חברת חשמל"},
+                 "product": {"mode": "extract", "source": "subject", "regex": r"חשבון (\d+)"},
+                 "exclude": False, "match": [{"sender_contains": "iectest.co.il"}]},
+                {"id": "excluded", "name": "(excluded)", "exclude": True, "root": None,
+                 "seller": None, "product": None,
+                 "match": [{"sender_contains": "spam.example", "subject_contains": "מבצע"}]},
+            ]}, ensure_ascii=False), encoding="utf-8")
+        orig = rules.RULES_FILE
+        rules.RULES_FILE = rules_file
+        self.addCleanup(setattr, rules, "RULES_FILE", orig)
         for name in ("save_email_pdf", "create_ticktick_task"):
             self.addCleanup(setattr, receipt_saver, name, getattr(receipt_saver, name))
             setattr(receipt_saver, name, lambda *a, **k: None)
@@ -115,11 +117,10 @@ class TestCategoryRouting(unittest.TestCase):
         self.assertEqual(res["status"], "excluded")
 
     def test_attachment_condition_uses_message_count(self):
-        import json, categories
-        cats = json.loads(categories.CATEGORIES_FILE.read_text(encoding="utf-8"))
-        cats[0]["match"][0]["attachments"] = "one"
-        categories.CATEGORIES_FILE.write_text(json.dumps(cats, ensure_ascii=False),
-                                              encoding="utf-8")
+        import json, rules
+        data = json.loads(rules.RULES_FILE.read_text(encoding="utf-8"))
+        data["rules"][0]["match"][0]["attachments"] = "one"
+        rules.RULES_FILE.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
         orig = receipt_saver.FALLBACK_LOG_FILE, receipt_saver.MANUAL_DIR
         self.addCleanup(setattr, receipt_saver, "FALLBACK_LOG_FILE", orig[0])
         self.addCleanup(setattr, receipt_saver, "MANUAL_DIR", orig[1])
@@ -136,13 +137,13 @@ class TestCategoryRouting(unittest.TestCase):
 
 class TestGmailAttachmentNames(unittest.TestCase):
     def test_nested_parts_and_document_count(self):
-        import gmail_provider, categories
+        import gmail_provider, rules
         payload = {"parts": [{"filename": "a.pdf"},
                              {"filename": "", "parts": [{"filename": "logo.png"},
                                                         {"filename": "b.PDF"}]}]}
         names = gmail_provider._attachment_names(payload)
         self.assertEqual(names, ["a.pdf", "logo.png", "b.PDF"])
-        self.assertEqual(categories.count_documents(names), 2)
+        self.assertEqual(rules.count_documents(names), 2)
 
 
 class TestUniqueFolder(unittest.TestCase):

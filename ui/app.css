@@ -511,3 +511,72 @@ main { flex: 1; overflow: hidden; position: relative; }
   display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted);
 }
 .cat-match-del { padding: 2px 6px !important; color: var(--bad) !important; }
+
+/* ---- Rules view: root groups ------------------------------------------ */
+#rules-list { display: flex; flex-direction: column; gap: 12px; }
+.root-group {
+  --root: var(--panel-2);
+  border: 1px solid var(--line); border-radius: 10px; padding: 8px;
+  border-left: 5px solid var(--root); background: var(--panel);
+}
+.root-group[hidden] { display: none; }
+.root-group.is-special { border-left-color: var(--warn); }
+.root-head { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 2px 2px 8px; }
+.root-swatch { width: 14px; height: 14px; border-radius: 4px; background: var(--root); flex: none; }
+.root-group.is-special .root-swatch { display: none; }
+.root-name { font-weight: 600; font-size: 14px; }
+.root-folder {
+  color: var(--muted); font-size: 12px; min-width: 0; flex: 1 1 auto;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.root-count { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.root-actions { display: flex; gap: 6px; flex: none; }
+.root-actions button, .root-new-rule button, .root-editor button, .re-delete button {
+  background: var(--panel-2); color: var(--muted); border: 1px solid var(--line);
+  border-radius: 6px; padding: 5px 10px; font-size: 12px; cursor: pointer;
+}
+.root-actions button:hover, .root-new-rule button:hover, .root-editor button:hover,
+.re-delete button:hover { color: var(--text); border-color: var(--accent); }
+.root-actions .root-del { color: var(--bad); }
+.root-rules { display: flex; flex-direction: column; gap: 6px; }
+.root-rules .cat[hidden] { display: none; }
+.root-new-rule { display: flex; gap: 6px; margin: 0 0 8px; }
+.root-new-rule[hidden] { display: none; }
+.root-new-rule input, .root-editor input, .re-delete select, .rule-root {
+  padding: 5px 8px; border-radius: 6px; border: 1px solid var(--line);
+  background: var(--bg); color: var(--text); font-size: 12px; min-width: 0;
+}
+.root-new-rule input { flex: 1 1 auto; max-width: 340px; }
+.root-editor-host { margin: 0 0 8px; }
+.root-editor-host[hidden] { display: none; }
+#root-new-form { margin-bottom: 10px; }
+.root-editor {
+  display: flex; flex-direction: column; gap: 8px; padding: 10px;
+  border: 1px dashed var(--line); border-radius: 8px; background: var(--panel);
+}
+.re-row { display: grid; grid-template-columns: 70px 1fr; align-items: center; gap: 8px; }
+.re-row > label { color: var(--muted); font-size: 12px; }
+.re-row .combo { display: block; min-width: 0; }
+.re-colors { display: flex; gap: 6px; flex-wrap: wrap; }
+.re-swatch {
+  width: 24px; height: 24px; border-radius: 6px; border: 1px solid rgba(0, 0, 0, .15) !important;
+  padding: 0 !important; cursor: pointer;
+}
+.re-swatch.on { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent); }
+.re-actions { display: flex; gap: 6px; }
+.re-delete { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+.rule-root { max-width: 160px; }
+
+/* ---- Fallbacks: rule chips under the root grid ------------------------- */
+.opt-body .f-root-name, .opt-body .f-rule-name { flex: 1 1 100%; max-width: 360px; }
+.rule-pick { flex: 1 1 100%; display: flex; gap: 8px; align-items: flex-start; }
+.rule-pick[hidden] { display: none; }
+.rule-pick-lbl { color: var(--muted); font-size: 11px; padding-top: 5px; flex: none; }
+.rule-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.rule-chip {
+  background: var(--panel); color: var(--muted); border: 1px solid var(--line);
+  border-radius: 14px; padding: 3px 11px; font-size: 12px; cursor: pointer;
+}
+.rule-chip:hover { color: var(--text); border-color: var(--accent); }
+.rule-chip.is-new { border-style: dashed; }
+.rule-chip.on { color: var(--text); background: rgba(79, 140, 255, .16); border: 1px solid var(--accent); }

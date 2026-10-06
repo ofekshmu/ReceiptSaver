@@ -59,7 +59,7 @@ class TestBody(unittest.TestCase):
         self.assertEqual(K.suggest("x@y.com", "s", "")["body"], [])
 
     def test_body_keywords_are_substrings_of_normalised_body(self):
-        import categories as C
+        import rules as C
         norm = C.normalize_body(BODY)
         for k in K.suggest("x@y.com", "", BODY)["body"]:
             self.assertIn(k, norm)
