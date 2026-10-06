@@ -747,6 +747,107 @@ function makeMatchRule(slot, { entry, suggest, attachmentHint } = {}) {
 
 const hasAnchor = m => asList(m.sender_contains).length + asList(m.subject_contains).length > 0;
 
+// ---- category tile grid ("File under a category") --------------------------
+// "＋ New category" tile (always shown) + one pastel tile per category; the
+// search box filters tiles by name / folder / seller / sender. The chosen value
+// lives in root.dataset.value; onChange(value) fires on a pick.
+const PASTELS = ["#f9d5dc", "#fde0c8", "#fbefb8", "#d6efcf", "#cbece8",
+                 "#d3e3f8", "#e0d9f6", "#f3d6ec"];
+
+function pastelFor(id) {
+  let h = 0;
+  for (const ch of String(id)) h = (h * 31 + ch.codePointAt(0)) >>> 0;
+  return PASTELS[h % PASTELS.length];
+}
+
+function makeCatGrid(root, cats, { value, onChange }) {
+  const grid = $(".cat-grid", root), search = $(".cat-search", root);
+  const empty = $(".cat-grid-empty", root);
+  const tiles = [];
+
+  const tile = (val, build, hay) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "cat-tile";
+    b.dataset.value = val;
+    b.setAttribute("role", "option");
+    build(b);
+    b.addEventListener("click", () => pick(val));
+    grid.appendChild(b);
+    tiles.push({ el: b, val, hay: (hay || "").toLowerCase() });
+  };
+  const line = (cls, text, el) => {
+    const d = document.createElement(el || "div");
+    d.className = cls;
+    d.textContent = text;
+    return d;
+  };
+
+  tile(FB_NEWCAT, b => {
+    b.classList.add("is-new");
+    b.append(line("ct-plus", "＋"), line("ct-name", "New category"));
+    b.title = "Create a new category from this email";
+  });
+  for (const c of cats) {
+    const n = (c.match || []).length;
+    const sellerTxt = c.seller && c.seller.mode === "fixed" ? c.seller.value : specSummary(c.seller);
+    const senders = (c.match || []).flatMap(m => asList(m.sender_contains)).join(" ");
+    tile(c.id, b => {
+      b.style.setProperty("--tile", pastelFor(c.id));
+      const name = line("ct-name", c.name); name.dir = "auto";
+      const dest = line("ct-dest", destLabel(c.destination) || "קבלות"); dest.dir = "auto";
+      const meta = line("ct-meta", "");
+      const sel = line("ct-seller", sellerTxt, "span"); sel.dir = "auto";
+      meta.append(sel, line("ct-count", `${n} rule${n === 1 ? "" : "s"}`, "span"));
+      b.append(line("ct-check", "✓"), name, dest, meta);
+      b.title = `${c.name}\n${c.destination || "קבלות"}`;
+    }, [c.name, destLabel(c.destination), c.destination, sellerTxt, senders].join(" "));
+  }
+
+  function paint() {
+    for (const t of tiles) {
+      const on = t.val === root.dataset.value;
+      t.el.classList.toggle("is-selected", on);
+      t.el.setAttribute("aria-selected", on ? "true" : "false");
+    }
+  }
+  function pick(val) {
+    root.dataset.value = val;
+    paint();
+    onChange(val);
+  }
+  function filter() {
+    const q = search.value.trim().toLowerCase();
+    let shown = 0;
+    for (const t of tiles) {
+      const vis = t.val === FB_NEWCAT || !q || t.hay.includes(q);
+      t.el.hidden = !vis;
+      if (vis && t.val !== FB_NEWCAT) shown++;
+    }
+    empty.hidden = !q || shown > 0;
+  }
+  search.addEventListener("input", filter);
+  search.addEventListener("keydown", e => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();                      // never submit the form from here
+    const first = tiles.find(t => t.val !== FB_NEWCAT && !t.el.hidden)
+               || tiles.find(t => t.val === FB_NEWCAT);
+    if (first) { pick(first.val); first.el.focus(); }
+  });
+
+  root.dataset.value = value;
+  paint();
+  const sel = tiles.find(t => t.val === value);
+  if (sel && value !== FB_NEWCAT) {
+    // scroll the grid (only the grid) when the pre-selected tile is below its fold
+    requestAnimationFrame(() => {
+      if (sel.el.offsetTop + sel.el.offsetHeight > grid.clientHeight)
+        grid.scrollTop = sel.el.offsetTop - 8;
+    });
+  }
+  return { get value() { return root.dataset.value; } };
+}
+
 // ---- the fallback form ---------------------------------------------------
 const FB_NEWCAT = "__new__";
 let FB_CATS = null;
@@ -853,10 +954,6 @@ async function wireForm(scope, it, s) {
 
   // "File under a category" picker
   const cats = await loadCats();
-  const items = [{ value: FB_NEWCAT, label: "＋ New category…" }];
-  cats.filter(c => !c.exclude).forEach(c =>
-    items.push({ value: c.id, label: `${c.name} — ${destLabel(c.destination) || "קבלות"}`,
-                 title: c.destination || "" }));
   const onCat = async val => {
     const cat = val === FB_NEWCAT ? null : cats.find(c => c.id === val);
     if (cat) {
@@ -875,9 +972,12 @@ async function wireForm(scope, it, s) {
     }
     syncFieldsForKind(form);
   };
-  const catCombo = makeCombo($(".f-cat-assign", form), { items, onChange: onCat });
   const known = s.category_id && cats.find(c => c.id === s.category_id && !c.exclude);
-  catCombo.setValue(known ? known.id : FB_NEWCAT);
+  makeCatGrid($(".f-cat-assign", form), cats.filter(c => !c.exclude), {
+    value: known ? known.id : FB_NEWCAT,
+    // picking a tile implies "File under a category", whatever was selected before
+    onChange: val => { $('input[name=kind][value="category"]', form).checked = true; return onCat(val); },
+  });
   if (known) await onCat(known.id);
 
   form.querySelectorAll("input[name=kind]").forEach(r =>

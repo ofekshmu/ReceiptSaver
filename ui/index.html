@@ -257,16 +257,17 @@
             <div class="opt">
               <label class="opt-head"><input type="radio" name="kind" value="category" checked> File under a category</label>
               <span class="opt-desc">File this email now <b>and</b> remember it: pick an existing category or create a new one, so future emails like it file automatically.</span>
-              <span class="opt-body">
-                <div class="combo f-cat-assign" data-value="">
-                  <input class="combo-input" type="text" dir="auto" autocomplete="off"
-                         spellcheck="false" placeholder="Choose a category or type to search&hellip;"
-                         title="Which category this email belongs to">
-                  <ul class="combo-list" hidden></ul>
+              <div class="opt-body">
+                <div class="cat-picker f-cat-assign" data-value="">
+                  <input class="cat-search" type="search" dir="auto" autocomplete="off" spellcheck="false"
+                         placeholder="Search categories&hellip;"
+                         title="Filter by name, folder, seller or sender">
+                  <div class="cat-grid" role="listbox" aria-label="Categories"></div>
+                  <div class="cat-grid-empty" hidden>No category matches &mdash; create a new one.</div>
                 </div>
                 <input class="f-cat-name" type="text" dir="auto" hidden
                        placeholder="New category name (e.g. חשמל)">
-              </span>
+              </div>
               <div class="opt-slot"></div>
             </div>
             <div class="opt">

@@ -158,7 +158,56 @@ main { flex: 1; overflow: hidden; position: relative; }
 }
 .fb-fields :disabled { opacity: .55; cursor: not-allowed; }
 
-/* searchable combobox — fallback "File under a category" picker */
+/* category tile grid — fallback "File under a category" picker */
+.opt-body .cat-picker { flex: 1 1 100%; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.opt-body .cat-search { width: 100%; max-width: 360px; }
+.cat-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px;
+  /* at most ~3 rows of tiles; more scroll inside the grid */
+  max-height: calc(3 * 96px + 2 * 8px + 16px); overflow-y: auto; padding: 8px 6px 8px 8px;
+  scrollbar-gutter: stable; position: relative;
+}
+.cat-tile {
+  --tile: var(--panel-2);
+  position: relative; display: flex; flex-direction: column; gap: 3px; justify-content: flex-start;
+  min-height: 96px; padding: 9px 10px; text-align: start; cursor: pointer;
+  background: var(--tile); color: #1f232b; border: 1px solid rgba(0, 0, 0, .06);
+  border-radius: 10px; box-shadow: 0 1px 2px rgba(0, 0, 0, .25);
+  transition: transform .08s ease, box-shadow .12s ease;
+}
+.cat-tile[hidden] { display: none; }
+.cat-tile:hover { transform: translateY(-1px); box-shadow: 0 3px 10px rgba(0, 0, 0, .3); }
+.cat-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.cat-tile.is-selected { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent); }
+.cat-tile .ct-name {
+  font-weight: 600; font-size: 13px; line-height: 1.25; overflow: hidden;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
+.cat-tile .ct-dest, .cat-tile .ct-seller {
+  font-size: 11px; opacity: .72; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cat-tile .ct-meta { margin-top: auto; display: flex; gap: 6px; align-items: baseline; min-width: 0; }
+.cat-tile .ct-seller { flex: 1 1 auto; min-width: 0; }
+.cat-tile .ct-count { flex: none; font-size: 11px; opacity: .6; }
+/* selected badge sits on the corner, clear of LTR and RTL text alike */
+.cat-tile .ct-check {
+  position: absolute; top: -7px; left: -7px; width: 18px; height: 18px; border-radius: 50%;
+  background: var(--accent); color: #fff; font-size: 11px; font-weight: 700; line-height: 18px;
+  text-align: center; box-shadow: 0 0 0 2px var(--bg); display: none;
+}
+.cat-tile.is-selected .ct-check { display: block; }
+.cat-tile.is-new {
+  background: transparent; color: var(--muted); border: 1.5px dashed var(--line);
+  box-shadow: none; align-items: center; justify-content: center;
+}
+.cat-tile.is-new:hover { color: var(--text); border-color: var(--accent); }
+.cat-tile.is-new.is-selected { color: var(--text); border-style: solid; border-color: var(--accent); }
+.cat-tile.is-new .ct-plus { font-size: 22px; line-height: 1; }
+.cat-tile.is-new .ct-check { display: none; }
+.cat-grid-empty { color: var(--muted); font-size: 12px; font-style: italic; }
+.cat-grid-empty[hidden] { display: none; }
+
+/* searchable combobox — destination picker */
 .combo { position: relative; display: inline-block; min-width: 240px; max-width: 100%; }
 .combo-input { width: 100%; }
 .combo-list {

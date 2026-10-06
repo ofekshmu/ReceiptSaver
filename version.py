@@ -12,7 +12,7 @@ window always tells you exactly which build is running.
 import subprocess
 from pathlib import Path
 
-__version__ = "1.1.26"
+__version__ = "1.1.27"
 
 _HERE = Path(__file__).parent
 _cache = None
