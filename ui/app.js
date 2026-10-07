@@ -956,6 +956,7 @@ function syncFieldsForKind(form) {
   const opts = $$(".opt", form);
   const before = animate ? opts.map(o => o.getBoundingClientRect().height) : null;
   applyFieldsForKind(form);
+  updatePin(form);
   st.lastKind = kind;
   if (!animate) return;
   // bring the newly opened option up to just under the pinned email header —
@@ -977,6 +978,29 @@ function syncFieldsForKind(form) {
                            { duration: 220, easing: "cubic-bezier(.2, .7, .2, 1)" });
     anim.onfinish = anim.oncancel = () => { o.style.overflow = ""; };
   });
+}
+
+// The pinned email header carries a second line with the current choice —
+// "◉ Change/add rule · קבלות › חשמל" — so one pinned block says which email
+// and what you're doing with it (no separately pinned option row, no gap).
+function updatePin(form) {
+  const card = form.closest(".card");
+  const pin = card && $(".fb-pin", card);
+  if (!pin) return;
+  const opt = $(".opt.is-selected .opt-head", form);
+  pin.textContent = "";
+  pin.hidden = !opt;
+  if (!opt) return;
+  pin.append("◉ " + opt.textContent.trim());
+  const kind = (form.querySelector("input[name=kind]:checked") || {}).value;
+  if (kind === "file") {
+    const root = $(".step-root .step-summary", form).textContent.trim();
+    const rule = $(".step-rule .step-summary", form).textContent.trim();
+    pin.append("  ·  ");
+    const b = document.createElement("bdi");
+    b.textContent = root ? `${root}  ›  ${rule}` : "pick a root";
+    pin.appendChild(b);
+  }
 }
 
 function applyFieldsForKind(form) {

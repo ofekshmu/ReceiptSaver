@@ -643,8 +643,13 @@ button.step-head:hover .step-toggle { text-decoration: underline; }
   margin-top: -12px; padding: 12px 0 8px;                 /* covers the card's top padding */
   background: var(--panel);
 }
-.card.fb .opt.is-selected > .opt-head,
-.card.fb-compact.is-open .opt.is-selected > .opt-head {
-  position: sticky; top: calc(var(--fbh) - 16px); z-index: 5;
-  background: #1a1f28; margin: 0 -6px; padding: 5px 6px; border-radius: 6px;
+/* one pinned block: a soft edge separates it from the form scrolling under it */
+.card.fb .fb-head, .card.fb-compact.is-open .fb-row {
+  border-bottom: 1px solid var(--line);
+  box-shadow: 0 10px 12px -10px rgba(0, 0, 0, .75);
 }
+.fb-pin {
+  margin-top: 5px; font-size: 12px; font-weight: 600; color: var(--accent);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.fb-pin[hidden], .card.fb-compact:not(.is-open) .fb-pin { display: none; }
