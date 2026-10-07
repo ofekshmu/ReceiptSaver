@@ -328,7 +328,7 @@ async function loadFallbacks() {
 // needs its header's height (--fbh). Measured on insert + resize; the
 // ResizeObserver in fallbackCard keeps it right when the header itself changes.
 function syncStickyOffsets() {
-  for (const card of $$("#fb-list .card.fb")) {
+  for (const card of $$("#fb-list .card.fb, #fb-list .card.fb-compact")) {
     const head = $(".fb-head", card);
     if (head) card.style.setProperty("--fbh", head.offsetHeight + "px");
   }
@@ -1236,10 +1236,15 @@ function fallbackCompact(it) {
   const slot = n.querySelector(".fb-form-slot");
   const caret = n.querySelector(".fb-expand");
   let built = false;
+  const card = n.querySelector(".card");
+  const head = $(".fb-head", card);
   const toggle = async () => {
     const opening = slot.hidden;
     slot.hidden = !opening;
     caret.classList.toggle("open", opening);
+    // an opened row is outlined and pins to the top while you scroll its form
+    card.classList.toggle("is-open", opening);
+    if (opening) card.style.setProperty("--fbh", head.offsetHeight + "px");
     if (opening && !built) {
       built = true;
       const form = $("#tpl-fallback").content.cloneNode(true).querySelector(".fb-form");
@@ -1250,6 +1255,7 @@ function fallbackCompact(it) {
   };
   caret.addEventListener("click", e => { e.stopPropagation(); toggle(); });
   n.querySelector(".card-main").addEventListener("click", toggle);
+  new ResizeObserver(() => card.style.setProperty("--fbh", head.offsetHeight + "px")).observe(head);
   return n;
 }
 

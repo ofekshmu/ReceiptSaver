@@ -123,8 +123,14 @@ main { flex: 1; overflow: hidden; position: relative; }
 }
 #fb-handoff .claude-mark { color: #d97757; }
 #fb-handoff:disabled .claude-mark { color: var(--muted); }
-.card.fb-compact { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 10px; }
+.card.fb-compact { flex-direction: column; align-items: stretch; gap: 0; }
+.card.fb-compact .fb-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .card.fb-compact .card-main { flex: 1 1 240px; cursor: pointer; }
+.card.fb-compact.is-open { border-color: var(--accent); }
+.card.fb-compact.is-open .fb-row {
+  position: sticky; top: -16px; z-index: 6;
+  margin-top: -12px; padding: 12px 0 8px; background: var(--panel);
+}
 .fb-expand {
   background: transparent; border: 0; color: var(--muted); cursor: pointer;
   font-size: 14px; padding: 2px 6px; border-radius: 5px;
@@ -132,6 +138,7 @@ main { flex: 1; overflow: hidden; position: relative; }
 .fb-expand:hover { color: var(--text); background: var(--panel-2); }
 .fb-expand.open { transform: rotate(90deg); }
 .fb-form-slot { flex-basis: 100%; }
+.card.fb-compact { --fbh: 56px; }
 #fb-handoff:disabled { background: var(--panel-2); color: var(--muted); cursor: default; }
 .card.fb { align-items: flex-start; flex-direction: row; }
 .fb-form { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
@@ -636,7 +643,8 @@ button.step-head:hover .step-toggle { text-decoration: underline; }
   margin-top: -12px; padding: 12px 0 8px;                 /* covers the card's top padding */
   background: var(--panel);
 }
-.card.fb .opt.is-selected > .opt-head {
+.card.fb .opt.is-selected > .opt-head,
+.card.fb-compact.is-open .opt.is-selected > .opt-head {
   position: sticky; top: calc(var(--fbh) - 16px); z-index: 5;
   background: #1a1f28; margin: 0 -6px; padding: 5px 6px; border-radius: 6px;
 }

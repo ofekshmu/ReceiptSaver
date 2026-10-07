@@ -382,19 +382,21 @@
 
   <template id="tpl-fb-compact">
     <article class="card fb-compact">
-      <input type="checkbox" class="fb-check" title="Select for &quot;Handle selected with Claude&quot;">
-      <div class="card-main">
-        <div class="card-title" dir="auto"></div>
-        <div class="card-sub" dir="auto"></div>
+      <div class="fb-row fb-head">
+        <input type="checkbox" class="fb-check" title="Select for &quot;Handle selected with Claude&quot;">
+        <div class="card-main">
+          <div class="card-title" dir="auto"></div>
+          <div class="card-sub" dir="auto"></div>
+        </div>
+        <span class="conf"></span>
+        <a class="open-folder" href="#" title="Open folder">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+               stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/>
+          </svg>
+        </a>
+        <button class="fb-expand" title="Show options">&#9656;</button>
       </div>
-      <span class="conf"></span>
-      <a class="open-folder" href="#" title="Open folder">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
-             stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/>
-        </svg>
-      </a>
-      <button class="fb-expand" title="Show options">&#9656;</button>
       <div class="fb-form-slot" hidden></div>
     </article>
   </template>
