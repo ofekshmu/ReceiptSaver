@@ -186,6 +186,7 @@ main { flex: 1; overflow: hidden; position: relative; }
 .cat-tile .ct-dest, .cat-tile .ct-seller {
   font-size: 11px; opacity: .72; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+.cat-tile .ct-dest:empty { display: none; }
 .cat-tile .ct-meta { margin-top: auto; display: flex; gap: 6px; align-items: baseline; min-width: 0; }
 .cat-tile .ct-seller { flex: 1 1 auto; min-width: 0; }
 .cat-tile .ct-count { flex: none; font-size: 11px; opacity: .6; }

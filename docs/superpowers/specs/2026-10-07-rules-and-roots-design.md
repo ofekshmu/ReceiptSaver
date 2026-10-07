@@ -62,3 +62,5 @@ delete, ▸ editor with seller/product + alternatives + Add alternative);
 - Root tiles are smaller and show only `N rules`; the folder line is the
   innermost folder, with parents added only as far as needed to disambiguate.
 - Scrollbars app-wide: slim, single-colour thumb, no arrows.
+- (v1.1.30) The folder line is shown only when the root's name doesn't already
+  contain the folder's name (no duplicate path on derived names).

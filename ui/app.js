@@ -897,6 +897,12 @@ function shortFolderLabels(folders) {
   return parts.map((_, i) => label(i));
 }
 
+// Does showing a root's folder tell you anything its name doesn't?
+function folderAddsInfo(name, folder) {
+  const inner = String(folder || "").split(/[\\/]+/).filter(Boolean).pop() || "";
+  return !!inner && !String(name || "").toLowerCase().includes(inner.toLowerCase());
+}
+
 function rootTileItems(data) {
   const subs = shortFolderLabels(data.roots.map(r => r.folder));
   return data.roots.map((r, i) => {
@@ -904,7 +910,9 @@ function rootTileItems(data) {
     const senders = rs.flatMap(x => (x.match || []).flatMap(m => asList(m.sender_contains)));
     return {
       value: r.id, name: r.name, color: r.color,
-      sub: subs[i],
+      // the folder line only when it adds something: most root names are
+      // already derived from their folder (full path stays on hover)
+      sub: folderAddsInfo(r.name, r.folder) ? subs[i] : "",
       count: plural(rs.length, "rule"),
       title: `${r.name}\n${r.folder}`,
       hay: [r.name, r.folder, destLabel(r.folder), ...rs.map(x => x.name),
@@ -1068,7 +1076,7 @@ async function wireForm(scope, it, s) {
         used.filter(u => u === c).length < used.filter(u => u === best).length ? c : best, PASTELS[0]);
       st.newRoot = { folder: res.path, color };
       $(".f-root-name", form).value = name;
-      return { name, color, sub: name, count: "new root", title: `${res.path}\nsaved when you Apply`,
+      return { name, color, sub: "", count: "new root", title: `${res.path}\nsaved when you Apply`,
                hay: `${name} ${res.path}` };
     },
     onChange: val => { selectFile(); return onRule(NEW); },
