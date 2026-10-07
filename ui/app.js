@@ -944,7 +944,32 @@ function rootTileItems(data) {
 //   move once     → destination + plain seller/product, nothing remembered
 //   exclude       → the match rule only
 //   skip          → nothing
+// Switching between the four options animates the change: the option you
+// leave closes and the one you pick opens (heights tweened between the
+// before/after layouts). Skipped with "reduce motion" and on the first sync.
+const REDUCE_MOTION = window.matchMedia("(prefers-reduced-motion: reduce)");
+
 function syncFieldsForKind(form) {
+  const st = form._fb || {};
+  const kind = (form.querySelector("input[name=kind]:checked") || {}).value;
+  const animate = st.lastKind && st.lastKind !== kind && !REDUCE_MOTION.matches;
+  const opts = $$(".opt", form);
+  const before = animate ? opts.map(o => o.getBoundingClientRect().height) : null;
+  applyFieldsForKind(form);
+  st.lastKind = kind;
+  if (!animate) return;
+  opts.forEach((o, i) => {
+    const after = o.getBoundingClientRect().height;
+    if (Math.abs(after - before[i]) < 1) return;
+    o.getAnimations().forEach(a => a.cancel());
+    o.style.overflow = "hidden";
+    const anim = o.animate([{ height: `${before[i]}px` }, { height: `${after}px` }],
+                           { duration: 220, easing: "cubic-bezier(.2, .7, .2, 1)" });
+    anim.onfinish = anim.oncancel = () => { o.style.overflow = ""; };
+  });
+}
+
+function applyFieldsForKind(form) {
   const st = form._fb;
   const kind = (form.querySelector("input[name=kind]:checked") || {}).value;
   const data = st.data || { roots: [], rules: [] };
