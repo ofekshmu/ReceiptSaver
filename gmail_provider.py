@@ -17,6 +17,8 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
+import rules
+
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
 GMAIL_SUBJECT_KEYWORDS = (
@@ -27,24 +29,23 @@ GMAIL_SUBJECT_KEYWORDS = (
 
 
 def _query_terms() -> list:
-    """`{sender_contains, exclude_subject_contains}` per category match entry."""
+    """`{sender_contains, exclude_subject_contains}` per rule alternative (rules.query_terms)."""
     try:
-        import categories
-        return categories.query_terms()
+        return rules.query_terms()
     except Exception:
         return []
 
 
 def build_gmail_query() -> str:
-    """Build Gmail search query, adding from: exceptions for domain-based category senders."""
+    """Build Gmail search query, adding from: exceptions for domain-based rule senders."""
     base = f'-in:sent -subject:פרסומת newer_than:60d ((has:attachment AND ({GMAIL_SUBJECT_KEYWORDS}))'
     for term in _query_terms():
-        sender  = term["sender_contains"]
-        exclude = term["exclude_subject_contains"]
+        sender   = term["sender_contains"]
+        excludes = term["exclude_subject_contains"]
         if "." in sender:  # domain-based match (e.g. icmega.org)
             clause = f"from:{sender}"
-            if exclude:
-                clause = f"({clause} -subject:{exclude})"
+            if excludes:
+                clause = f"({clause} " + " ".join(f"-subject:{x}" for x in excludes) + ")"
             base += f" OR {clause}"
     base += ' OR (has:attachment AND subject:"סיכום שיעור יפנית")'
     return base + ")"
@@ -80,6 +81,21 @@ def _first_attachment_name(payload: dict) -> str:
         if part.get("filename"):
             return part["filename"]
     return ""
+
+
+def _attachment_names(payload: dict) -> list:
+    """Every attachment filename in the message, nested parts included."""
+    names = []
+
+    def walk(parts):
+        for part in parts:
+            if part.get("filename"):
+                names.append(part["filename"])
+            if part.get("parts"):
+                walk(part["parts"])
+
+    walk(payload.get("parts", []))
+    return names
 
 
 def _get_body_text(payload: dict) -> str:
@@ -163,6 +179,7 @@ def fetch_message(service, msg_id: str, account: dict) -> dict:
         "body_text": _get_body_text(payload),
         "body_html": _get_body_html(payload),
         "first_attachment_name": _first_attachment_name(payload),
+        "attachment_count": rules.count_documents(_attachment_names(payload)),
         "attachments": lambda: _fetch_attachments(service, msg_id, payload),
         "link": gmail_link(msg_id),
     }

@@ -11,7 +11,7 @@ Folder format: YYYY-MM-DD - Seller - Product - [account]
 Decision pipeline per email:
   1. Skip if in SENT folder
   2. Check hardcoded KNOWN_RULES  → save to קבלות\
-  3. Check categories.json        → save to the category's destination
+  3. Check rules.json             → save to the matching rule's root folder
   4. Fallback                     → save to קבלות\_לטיפול ידני\
                                     + log to fallback_log.json
                                     + TickTick task
@@ -28,7 +28,7 @@ import logging
 import datetime
 from pathlib import Path
 
-import categories
+import rules
 
 import requests
 
@@ -341,7 +341,7 @@ def save_email_pdf(body_html: str, folder: Path,
         return None
 
 # ══════════════════════════════════════════════════════════════════════════
-# CATEGORIES  (categories.json — see categories.py)
+# RULES  (rules.json — see rules.py)
 # ══════════════════════════════════════════════════════════════════════════
 
 def _category_label(dest: Path):
@@ -471,8 +471,9 @@ def process_message(msg: dict, account: dict, run_id: str = "") -> dict:
         m = re.search(r"מאת\s+(.+?)$", subject)
         seller  = sanitize(m.group(1).strip()) if m else "iCount"
         product = "חשבונית מס קבלה"
-        cat_match = categories.match_category(sender, subject)
-        base_dir  = (cat_match[2] if cat_match and cat_match[0] != categories.EXCLUDE
+        cat_match = rules.match_rule(sender, subject,
+                                     attachment_count=msg.get("attachment_count"))
+        base_dir  = (cat_match[2] if cat_match and cat_match[0] != rules.EXCLUDE
                      else RECEIPTS_DIR)
         category  = _category_label(base_dir)
         folder_name = f"{date_str} - {seller} - {product} - {label}"
@@ -506,12 +507,13 @@ def process_message(msg: dict, account: dict, run_id: str = "") -> dict:
                            category=category, rule_source="hardcoded")
         return {"status": "saved", "record": rec}
 
-    # ── Step 2: categories ─────────────────────────────────────────────
+    # ── Step 2: rules ──────────────────────────────────────────────────
     body   = msg["body_text"]
-    custom = categories.match_category(sender, subject, body)
+    custom = rules.match_rule(sender, subject, body,
+                              attachment_count=msg.get("attachment_count"))
     if custom:
         seller, product, base_dir = custom
-        if seller == categories.EXCLUDE:
+        if seller == rules.EXCLUDE:
             log.info(f"EXCLUDED   {sender} — {subject[:60]}")
             rec = _make_record(msg, account, run_id, "EXCLUDED", None, None, [],
                                rule_source="custom")
@@ -551,6 +553,7 @@ def process_message(msg: dict, account: dict, run_id: str = "") -> dict:
         "subject":       subject,
         "folder_name":   folder_name,
         "folder_path":   str(folder),
+        "attachment_count": msg.get("attachment_count"),
         "resolved":      False,
     })
     rec = _make_record(msg, account, run_id, "FALLBACK", folder, folder_name, files)
