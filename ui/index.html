@@ -288,8 +288,8 @@
           <fieldset class="fb-kinds">
             <legend>What to do with this email</legend>
             <div class="opt">
-              <label class="opt-head"><input type="radio" name="kind" value="file" checked> File under a root</label>
-              <span class="opt-desc">File this email now <b>and</b> remember it: pick the root (folder) it belongs in, then an existing rule or a new one, so future emails like it file automatically.</span>
+              <label class="opt-head"><input type="radio" name="kind" value="file" checked> Change/add rule</label>
+              <span class="opt-desc">File this email now <b>and</b> remember it: pick where it goes, then an existing rule (to extend it) or a new one, so future emails like it file automatically.</span>
               <div class="opt-body">
                 <div class="cat-picker f-root-pick" data-value="">
                   <input class="cat-search" type="search" dir="auto" autocomplete="off" spellcheck="false"
@@ -299,7 +299,8 @@
                   <div class="cat-grid-empty" hidden>No root matches &mdash; create a new one.</div>
                 </div>
                 <input class="f-root-name" type="text" dir="auto" hidden
-                       placeholder="New root name (e.g. חשמל)">
+                       placeholder="New root name (e.g. חשמל)"
+                       title="Name of the new root — saved together with the rule when you Apply">
                 <div class="rule-pick" hidden>
                   <span class="rule-pick-lbl">Rule</span>
                   <div class="rule-chips"></div>

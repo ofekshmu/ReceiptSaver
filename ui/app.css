@@ -162,15 +162,15 @@ main { flex: 1; overflow: hidden; position: relative; }
 .opt-body .cat-picker { flex: 1 1 100%; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .opt-body .cat-search { width: 100%; max-width: 360px; }
 .cat-grid {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(124px, 1fr)); gap: 8px;
   /* at most ~3 rows of tiles; more scroll inside the grid */
-  max-height: calc(3 * 96px + 2 * 8px + 16px); overflow-y: auto; padding: 8px 6px 8px 8px;
+  max-height: calc(3 * 70px + 2 * 8px + 16px); overflow-y: auto; padding: 8px 6px 8px 8px;
   scrollbar-gutter: stable; position: relative;
 }
 .cat-tile {
   --tile: var(--panel-2);
   position: relative; display: flex; flex-direction: column; gap: 3px; justify-content: flex-start;
-  min-height: 96px; padding: 9px 10px; text-align: start; cursor: pointer;
+  min-height: 70px; padding: 7px 9px; text-align: start; cursor: pointer;
   background: var(--tile); color: #1f232b; border: 1px solid rgba(0, 0, 0, .06);
   border-radius: 10px; box-shadow: 0 1px 2px rgba(0, 0, 0, .25);
   transition: transform .08s ease, box-shadow .12s ease;
@@ -180,7 +180,7 @@ main { flex: 1; overflow: hidden; position: relative; }
 .cat-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .cat-tile.is-selected { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent); }
 .cat-tile .ct-name {
-  font-weight: 600; font-size: 13px; line-height: 1.25; overflow: hidden;
+  font-weight: 600; font-size: 12.5px; line-height: 1.25; overflow: hidden;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
 }
 .cat-tile .ct-dest, .cat-tile .ct-seller {
@@ -202,7 +202,11 @@ main { flex: 1; overflow: hidden; position: relative; }
 }
 .cat-tile.is-new:hover { color: var(--text); border-color: var(--accent); }
 .cat-tile.is-new.is-selected { color: var(--text); border-style: solid; border-color: var(--accent); }
-.cat-tile.is-new .ct-plus { font-size: 22px; line-height: 1; }
+.cat-tile.is-new .ct-plus { font-size: 18px; line-height: 1; }
+.cat-tile.is-temp { border: 1.5px dashed rgba(0, 0, 0, .35); }
+.cat-tile.is-temp .ct-count {
+  opacity: 1; font-weight: 600; font-size: 10px; text-transform: uppercase; letter-spacing: .4px;
+}
 .cat-tile.is-new .ct-check { display: none; }
 .cat-grid-empty { color: var(--muted); font-size: 12px; font-style: italic; }
 .cat-grid-empty[hidden] { display: none; }
@@ -580,3 +584,14 @@ main { flex: 1; overflow: hidden; position: relative; }
 .rule-chip:hover { color: var(--text); border-color: var(--accent); }
 .rule-chip.is-new { border-style: dashed; }
 .rule-chip.on { color: var(--text); background: rgba(79, 140, 255, .16); border: 1px solid var(--accent); }
+
+/* ---- scrollbars: one slim, single-colour thumb everywhere (WebView2 is
+   Chromium; the standard scrollbar-color would disable these rules) ------ */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--line); border-radius: 8px;
+  border: 2px solid transparent; background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background: #3a4150; background-clip: padding-box; }
+::-webkit-scrollbar-button { display: none; width: 0; height: 0; }

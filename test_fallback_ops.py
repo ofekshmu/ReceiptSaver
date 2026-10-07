@@ -136,7 +136,7 @@ class TestApplyDecision(_Base):
         folder = self.receipts / "קניות"
         res = self.apply({
             "kind": "new_rule", "rule_name": "שופ",
-            "new_root": {"name": "קניות", "folder": str(folder)},
+            "new_root": {"name": "קניות", "folder": str(folder), "color": "#e0d9f6"},
             "seller": name("שופ", every_mail=False),
             "product": name("12345", extract={"source": "subject", "regex": r"#(\d+)",
                                               "fallback": "הזמנה"}),
@@ -146,7 +146,7 @@ class TestApplyDecision(_Base):
         data = self._data()
         root = next(r for r in data["roots"] if r["id"] == res["root_id"])
         self.assertEqual((root["name"], root["folder"]), ("קניות", str(folder)))
-        self.assertTrue(root["color"].startswith("#"))
+        self.assertEqual(root["color"], "#e0d9f6")
         rule = self._rule(res["rule_id"])
         self.assertIsNone(rule["seller"])
         self.assertEqual(rule["product"]["mode"], "extract")

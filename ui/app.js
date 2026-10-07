@@ -755,8 +755,12 @@ const hasAnchor = m => asList(m.sender_contains).length + asList(m.subject_conta
 const PASTELS = ["#f9d5dc", "#fde0c8", "#fbefb8", "#d6efcf", "#cbece8",
                  "#d3e3f8", "#e0d9f6", "#f3d6ec"];
 const NEW = "__new__";
+const TEMP = "__temp__";    // a not-yet-saved root picked via ＋ New root
 
-function makeTileGrid(root, items, { value, onChange, newLabel, newTitle }) {
+// With `onNew`, the ＋ tile is an action: onNew() -> item | null; a returned
+// item is shown as a temporary tile (right after ＋, replacing any previous
+// one) and selected.
+function makeTileGrid(root, items, { value, onChange, newLabel, newTitle, onNew }) {
   const grid = $(".cat-grid", root), search = $(".cat-search", root);
   const empty = $(".cat-grid-empty", root);
   grid.innerHTML = "";
@@ -767,34 +771,47 @@ function makeTileGrid(root, items, { value, onChange, newLabel, newTitle }) {
     d.textContent = text;
     return d;
   };
-  const tile = (val, build, hay) => {
+  const tile = (val, build, hay, before) => {
     const b = document.createElement("button");
     b.type = "button";
     b.className = "cat-tile";
     b.dataset.value = val;
     b.setAttribute("role", "option");
     build(b);
-    b.addEventListener("click", () => pick(val));
-    grid.appendChild(b);
-    tiles.push({ el: b, val, hay: (hay || "").toLowerCase() });
+    b.addEventListener("click", () => (val === NEW && onNew ? addNew() : pick(val)));
+    grid.insertBefore(b, before || null);
+    const t = { el: b, val, hay: (hay || "").toLowerCase() };
+    if (before) tiles.splice(1, 0, t); else tiles.push(t);
   };
+  const itemTile = (it, before) => tile(it.value, b => {
+    b.style.setProperty("--tile", it.color || PASTELS[0]);
+    if (it.value === TEMP) b.classList.add("is-temp");
+    const name = line("ct-name", it.name); name.dir = "auto";
+    const sub = line("ct-dest", it.sub || ""); sub.dir = "auto";
+    const meta = line("ct-meta", "");
+    if (it.meta) { const m = line("ct-seller", it.meta, "span"); m.dir = "auto"; meta.append(m); }
+    meta.append(line("ct-count", it.count || "", "span"));
+    b.append(line("ct-check", "✓"), name, sub, meta);
+    b.title = it.title || it.name;
+  }, it.hay, before);
 
   tile(NEW, b => {
     b.classList.add("is-new");
     b.append(line("ct-plus", "＋"), line("ct-name", newLabel));
     b.title = newTitle || "";
   });
-  for (const it of items) {
-    tile(it.value, b => {
-      b.style.setProperty("--tile", it.color || PASTELS[0]);
-      const name = line("ct-name", it.name); name.dir = "auto";
-      const sub = line("ct-dest", it.sub || ""); sub.dir = "auto";
-      const meta = line("ct-meta", "");
-      const m = line("ct-seller", it.meta || "", "span"); m.dir = "auto";
-      meta.append(m, line("ct-count", it.count || "", "span"));
-      b.append(line("ct-check", "✓"), name, sub, meta);
-      b.title = it.title || it.name;
-    }, it.hay);
+  for (const it of items) itemTile(it);
+
+  async function addNew() {
+    const it = await onNew();
+    if (!it) return;                         // cancelled — keep the current choice
+    const old = tiles.findIndex(t => t.val === TEMP);
+    if (old >= 0) { tiles[old].el.remove(); tiles.splice(old, 1); }
+    itemTile({ ...it, value: TEMP }, tiles[0].el.nextSibling);
+    search.value = "";
+    filter();
+    grid.scrollTop = 0;
+    pick(TEMP);
   }
 
   function paint() {
@@ -827,7 +844,7 @@ function makeTileGrid(root, items, { value, onChange, newLabel, newTitle }) {
     if (first) { pick(first.val); first.el.focus(); }
   });
 
-  root.dataset.value = value;
+  root.dataset.value = value || "";
   paint();
   const sel = tiles.find(t => t.val === value);
   if (sel && value !== NEW) {
@@ -861,14 +878,33 @@ function countsOf(data) {
 
 const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
 
+// Innermost folder name; when several roots share it, add parent folders
+// (2, 3, … levels) until each label is unique. folders: [path] -> [label]
+function shortFolderLabels(folders) {
+  const parts = folders.map(f => String(f || "").split(/[\\/]+/).filter(Boolean));
+  const depth = parts.map(() => 1);
+  const label = i => parts[i].slice(-depth[i]).join(" › ");
+  for (let guard = 0; guard < 12; guard++) {
+    const seen = {};
+    parts.forEach((_, i) => { (seen[label(i).toLowerCase()] ||= []).push(i); });
+    const clashes = Object.values(seen).filter(g => g.length > 1);
+    if (!clashes.length) break;
+    let grew = false;
+    for (const g of clashes) for (const i of g)
+      if (depth[i] < parts[i].length) { depth[i]++; grew = true; }
+    if (!grew) break;
+  }
+  return parts.map((_, i) => label(i));
+}
+
 function rootTileItems(data) {
-  return data.roots.map(r => {
+  const subs = shortFolderLabels(data.roots.map(r => r.folder));
+  return data.roots.map((r, i) => {
     const rs = data.rules.filter(x => !x.exclude && x.root === r.id);
     const senders = rs.flatMap(x => (x.match || []).flatMap(m => asList(m.sender_contains)));
     return {
       value: r.id, name: r.name, color: r.color,
-      sub: destLabel(r.folder) || r.folder,
-      meta: rs.map(x => x.name).join(", "),
+      sub: subs[i],
       count: plural(rs.length, "rule"),
       title: `${r.name}\n${r.folder}`,
       hay: [r.name, r.folder, destLabel(r.folder), ...rs.map(x => x.name),
@@ -878,10 +914,11 @@ function rootTileItems(data) {
 }
 
 // ---- the fallback form ---------------------------------------------------
-// "File under a root": root tiles → that root's rule chips (＋ New rule first)
+// "Change/add rule": root tiles → that root's rule chips (＋ New rule first)
 // → the fields block, which depends on the choice:
 //   new rule      → rule name, seller/product with tick + extract, match rule
-//                   (+ root name and destination when it's also a ＋ New root)
+//                   (+ root name for a ＋ New root — its folder was picked when
+//                   the ＋ tile was clicked; it's saved only on Apply)
 //   existing rule → seller/product show what THIS mail resolves to (one-off);
 //                   its alternatives listed + this mail's conditions added
 //   move once     → destination + plain seller/product, nothing remembered
@@ -892,16 +929,17 @@ function syncFieldsForKind(form) {
   const kind = (form.querySelector("input[name=kind]:checked") || {}).value;
   const data = st.data || { roots: [], rules: [] };
   const rootVal = $(".f-root-pick", form).dataset.value;
-  const isNewRoot = rootVal === NEW;
+  const isNewRoot = rootVal === TEMP;
   const root = isNewRoot ? null : data.roots.find(r => r.id === rootVal);
-  const existing = kind === "file" && !isNewRoot && st.ruleVal && st.ruleVal !== NEW
+  const noRoot = !isNewRoot && !root;
+  const existing = kind === "file" && root && st.ruleVal && st.ruleVal !== NEW
     ? data.rules.find(r => r.id === st.ruleVal) : null;
-  const isNewRule = kind === "file" && !existing;
+  const isNewRule = kind === "file" && !existing && !noRoot;
   const fields = $(".fb-fields", form), head = $(".fb-fields-head", form);
   const show = (sel, on) => { const el = $(sel, form); if (el) el.hidden = !on; };
 
   show(".f-root-name", kind === "file" && isNewRoot);
-  show(".rule-pick", kind === "file" && !isNewRoot);
+  show(".rule-pick", kind === "file" && !!root);
   show(".f-rule-name", isNewRule);
   $$(".opt", form).forEach(o =>
     o.classList.toggle("is-selected", !!$(`input[name=kind][value="${kind}"]`, o)));
@@ -912,20 +950,19 @@ function syncFieldsForKind(form) {
   if (fields.hidden) return;
 
   head.textContent =
-      existing            ? `Rule: ${existing.name} — files to ${root ? root.name : "its root"}`
-    : isNewRule && isNewRoot ? "New root + new rule — the fields below define them"
+      kind === "file" && noRoot ? "Pick a root above — or ＋ New root to choose a folder"
+    : existing            ? `Rule: ${existing.name} — files to ${root ? root.name : "its root"}`
+    : isNewRule && isNewRoot ? "New root + new rule — saved when you Apply"
     : isNewRule           ? `New rule in ${root ? root.name : "this root"}`
     : kind === "once"     ? "This receipt only — nothing is remembered"
     : kind === "exclude"  ? "Exclude emails matching this rule"
     : "";
   head.hidden = !head.textContent;
 
-  show(".fd-dest", kind === "once" || (kind === "file" && isNewRoot));
+  show(".fd-dest", kind === "once");
   show(".fd-seller", kind !== "exclude");
   show(".fd-product", kind !== "exclude");
   show(".fd-match", kind === "file" || kind === "exclude");
-  const destLbl = $(".fd-dest > label", form);
-  if (destLbl) destLbl.textContent = kind === "file" ? "New root's folder" : "Destination";
 
   st.seller.setSimple(!isNewRule);
   st.product.setSimple(!isNewRule);
@@ -983,7 +1020,7 @@ async function wireForm(scope, it, s) {
   function renderRuleChips() {
     const rootVal = $(".f-root-pick", form).dataset.value;
     chipsBox.innerHTML = "";
-    if (rootVal === NEW) return;
+    if (!data.roots.some(r => r.id === rootVal)) return;
     const add = (val, label, title) => {
       const c = document.createElement("button");
       c.type = "button";
@@ -1016,8 +1053,24 @@ async function wireForm(scope, it, s) {
   const startRoot = (knownRule && knownRule.root) || s.root_id;
   const rootOk = startRoot && data.roots.some(r => r.id === startRoot);
   makeTileGrid($(".f-root-pick", form), rootTileItems(data), {
-    value: rootOk ? startRoot : NEW,
-    newLabel: "New root", newTitle: "Create a new root (a destination folder) for this email",
+    value: rootOk ? startRoot : "",
+    newLabel: "New root",
+    newTitle: "Choose a folder (the folder picker can also create one) — it becomes a new root when you Apply",
+    // ＋ New root opens the folder picker; the root is only saved on Apply
+    onNew: async () => {
+      let res;
+      try { res = await api().pick_folder(); } catch (_) { res = { ok: false }; }
+      if (!res || !res.ok) { if (res && res.error) toast(res.error, true); return null; }
+      if (!res.path) return null;
+      const name = res.path.split(/[\\/]+/).filter(Boolean).pop() || res.path;
+      const used = data.roots.map(r => r.color);
+      const color = PASTELS.reduce((best, c) =>
+        used.filter(u => u === c).length < used.filter(u => u === best).length ? c : best, PASTELS[0]);
+      st.newRoot = { folder: res.path, color };
+      $(".f-root-name", form).value = name;
+      return { name, color, sub: name, count: "new root", title: `${res.path}\nsaved when you Apply`,
+               hay: `${name} ${res.path}` };
+    },
     onChange: val => { selectFile(); return onRule(NEW); },
   });
   st.ruleVal = knownRule && rootOk ? knownRule.id : NEW;
@@ -1034,19 +1087,19 @@ async function wireForm(scope, it, s) {
     if (kind === "file" || kind === "exclude") decision.match = st.match.value();
     if (kind === "file") {
       const rootVal = $(".f-root-pick", form).dataset.value;
-      if (rootVal !== NEW && st.ruleVal && st.ruleVal !== NEW) {
+      const isRoot = data.roots.some(r => r.id === rootVal);
+      if (!isRoot && rootVal !== TEMP) { toast("Pick a root first — or ＋ New root to choose a folder", true); return; }
+      if (isRoot && st.ruleVal && st.ruleVal !== NEW) {
         Object.assign(decision, { kind: "rule", rule_id: st.ruleVal,
           seller: { value: st.seller.value }, product: { value: st.product.value } });
       } else {
         Object.assign(decision, { kind: "new_rule",
           rule_name: $(".f-rule-name", form).value.trim(),
           seller: st.seller.field(), product: st.product.field() });
-        if (rootVal === NEW) {
+        if (rootVal === TEMP) {
           const name = $(".f-root-name", form).value.trim();
-          const folder = st.dest.value;
           if (!name) { toast("Name the new root first", true); return; }
-          if (!folder || folder === DEST_BROWSE) { toast("Pick the new root's folder first", true); return; }
-          decision.new_root = { name, folder };
+          decision.new_root = { name, folder: st.newRoot.folder, color: st.newRoot.color };
         } else {
           decision.root_id = rootVal;
         }

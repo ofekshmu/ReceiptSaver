@@ -275,7 +275,8 @@ def apply_decision(entry: dict, decision: dict, *,
             root = None
             if decision.get("new_root"):
                 nr = decision["new_root"]
-                root = _rules.new_root(nr.get("name"), nr.get("folder"), data=data)
+                root = _rules.new_root(nr.get("name"), nr.get("folder"),
+                                       color=nr.get("color"), data=data)
                 data["roots"].append(root)
             root_id = root["id"] if root else decision.get("root_id")
             rule = _rules.new_rule(decision.get("rule_name") or seller or "rule",

@@ -52,3 +52,13 @@ name/folder/colour, delete — empty only, else move rules to another root,
 ＋ New rule); rule rows (name, summary, root select, merge within root, save,
 delete, ▸ editor with seller/product + alternatives + Add alternative);
 ＋ New root in the header; Excluded group last.
+
+## Amendment (2026-10-07, v1.1.29)
+- The option is labelled **"Change/add rule"** (was "File under a root").
+- **＋ New root** opens the Windows folder picker directly; the chosen folder
+  becomes a temporary tile (dashed, `NEW ROOT`, next free colour) that is saved
+  as a root — with its colour — only when the fallback is applied. No separate
+  folder field for new roots.
+- Root tiles are smaller and show only `N rules`; the folder line is the
+  innermost folder, with parents added only as far as needed to disambiguate.
+- Scrollbars app-wide: slim, single-colour thumb, no arrows.
