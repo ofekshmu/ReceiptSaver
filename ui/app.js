@@ -913,8 +913,8 @@ function rootTileItems(data) {
       // the folder line only when it adds something: most root names are
       // already derived from their folder (full path stays on hover)
       sub: folderAddsInfo(r.name, r.folder) ? subs[i] : "",
-      count: plural(rs.length, "rule"),
-      title: `${r.name}\n${r.folder}`,
+      count: String(rs.length),
+      title: `${r.name}\n${r.folder}\n${plural(rs.length, "rule")}`,
       hay: [r.name, r.folder, destLabel(r.folder), ...rs.map(x => x.name),
             ...rs.map(x => specSummary(x.seller)), ...senders].join(" "),
     };
