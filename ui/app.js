@@ -958,6 +958,16 @@ function syncFieldsForKind(form) {
   applyFieldsForKind(form);
   st.lastKind = kind;
   if (!animate) return;
+  // bring the newly opened option up to just under the pinned email header —
+  // measured now, on the final layout, before the height tweens start
+  const view = form.closest(".view");
+  const opened = opts.find(o => o.contains(form.querySelector("input[name=kind]:checked")));
+  if (view && opened) {
+    const pinned = parseFloat(getComputedStyle(form.closest(".card")).getPropertyValue("--fbh")) || 0;
+    const top = view.scrollTop + opened.getBoundingClientRect().top
+              - view.getBoundingClientRect().top - pinned;
+    view.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+  }
   opts.forEach((o, i) => {
     const after = o.getBoundingClientRect().height;
     if (Math.abs(after - before[i]) < 1) return;
