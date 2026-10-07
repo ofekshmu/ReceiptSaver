@@ -64,3 +64,7 @@ delete, ▸ editor with seller/product + alternatives + Add alternative);
 - Scrollbars app-wide: slim, single-colour thumb, no arrows.
 - (v1.1.30) The folder line is shown only when the root's name doesn't already
   contain the folder's name (no duplicate path on derived names).
+- (v1.1.32) "Change/add rule" has two steps split by a thin line — ① Root
+  (collapses to a summary once chosen; "change" reopens) and ② Rule
+  (collapsed until a root is chosen). Unchosen options shrink to one line.
+  The email's header and the chosen option's row stay pinned while scrolling.

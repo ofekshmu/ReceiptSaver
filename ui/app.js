@@ -319,9 +319,21 @@ async function loadFallbacks() {
   for (const it of items) {
     list.appendChild(fbSimple ? fallbackCompact(it) : await fallbackCard(it));
   }
+  syncStickyOffsets();
   updateHandoffButton();
   refreshBadge(items.length);
 }
+
+// The pinned option row sits right under the pinned email header, so each card
+// needs its header's height (--fbh). Measured on insert + resize; the
+// ResizeObserver in fallbackCard keeps it right when the header itself changes.
+function syncStickyOffsets() {
+  for (const card of $$("#fb-list .card.fb")) {
+    const head = $(".fb-head", card);
+    if (head) card.style.setProperty("--fbh", head.offsetHeight + "px");
+  }
+}
+window.addEventListener("resize", syncStickyOffsets);
 
 $("#fb-viewtoggle").addEventListener("click", async () => {
   await api().set_ui_state({ fallbacks_simple: !fbSimple });
@@ -946,6 +958,18 @@ function syncFieldsForKind(form) {
   const fields = $(".fb-fields", form), head = $(".fb-fields-head", form);
   const show = (sel, on) => { const el = $(sel, form); if (el) el.hidden = !on; };
 
+  // ① Root collapses to a one-line summary once a root is chosen ("change"
+  // reopens it); ② Rule stays collapsed until there is a root.
+  const stepRoot = $(".step-root", form), stepRule = $(".step-rule", form);
+  stepRoot.classList.toggle("collapsed", !noRoot && !st.rootOpen);
+  $(".step-summary", stepRoot).textContent =
+    isNewRoot ? `＋ ${$(".f-root-name", form).value.trim() || "new root"}` : root ? root.name : "";
+  $(".step-toggle", stepRoot).hidden = noRoot;
+  $(".step-toggle", stepRoot).textContent = st.rootOpen ? "done" : "change";
+  stepRule.classList.toggle("collapsed", noRoot);
+  $(".step-summary", stepRule).textContent =
+    noRoot ? "pick a root first" : existing ? existing.name : "＋ new rule";
+
   show(".f-root-name", kind === "file" && isNewRoot);
   show(".rule-pick", kind === "file" && !!root);
   show(".f-rule-name", isNewRule);
@@ -1022,6 +1046,13 @@ async function wireForm(scope, it, s) {
   st.dest = await makeDestPicker($(".f-dest", form), s.destination);
   const data = st.data = await loadRules();
   const selectFile = () => { $('input[name=kind][value="file"]', form).checked = true; };
+  st.rootOpen = false;
+  $(".step-root .step-head", form).addEventListener("click", () => {
+    if (!$(".step-root", form).classList.contains("collapsed") && !st.rootOpen) return;  // nothing chosen yet
+    st.rootOpen = !st.rootOpen;
+    syncFieldsForKind(form);
+  });
+  $(".f-root-name", form).addEventListener("input", () => syncFieldsForKind(form));
 
   // rule chips for the chosen root: ＋ New rule + the root's rules
   const chipsBox = $(".rule-chips", form);
@@ -1079,7 +1110,8 @@ async function wireForm(scope, it, s) {
       return { name, color, sub: "", count: "new root", title: `${res.path}\nsaved when you Apply`,
                hay: `${name} ${res.path}` };
     },
-    onChange: val => { selectFile(); return onRule(NEW); },
+    // picking a root collapses step ① so step ② has the room
+    onChange: val => { selectFile(); st.rootOpen = false; return onRule(NEW); },
   });
   st.ruleVal = knownRule && rootOk ? knownRule.id : NEW;
   await onRule(st.ruleVal);
@@ -1153,7 +1185,12 @@ async function fallbackCard(it) {
     ? "low confidence — consider handling with Claude" : (s.confidence || "") + " confidence";
   conf.classList.add(s.confidence || "medium");
   wireForm(n, it, s);
-  n.querySelector(".card").dataset.mid = it.message_id;
+  const card = n.querySelector(".card");
+  card.dataset.mid = it.message_id;
+  // the email's header stays pinned while you scroll its form; the chosen
+  // option's row pins right under it, so it needs the header's height
+  const head = $(".fb-head", card);
+  new ResizeObserver(() => card.style.setProperty("--fbh", head.offsetHeight + "px")).observe(head);
   return n;
 }
 

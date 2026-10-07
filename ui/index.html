@@ -272,17 +272,19 @@
       <input type="checkbox" class="fb-check"
              title="Tick to include this email when you press &quot;Handle selected with Claude&quot;">
       <div class="card-main">
-        <div class="card-title" dir="auto"></div>
-        <div class="card-sub" dir="auto"></div>
-        <div class="fb-links">
-          <a class="open-folder" href="#" title="Open folder">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
-                 stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/>
-            </svg>
-          </a>
-          <a class="open-pdf" href="#">Open email.pdf</a>
-          <span class="conf"></span>
+        <div class="fb-head">
+          <div class="card-title" dir="auto"></div>
+          <div class="card-sub" dir="auto"></div>
+          <div class="fb-links">
+            <a class="open-folder" href="#" title="Open folder">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+                   stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/>
+              </svg>
+            </a>
+            <a class="open-pdf" href="#">Open email.pdf</a>
+            <span class="conf"></span>
+          </div>
         </div>
         <form class="fb-form">
           <fieldset class="fb-kinds">
@@ -291,24 +293,40 @@
               <label class="opt-head"><input type="radio" name="kind" value="file" checked> Change/add rule</label>
               <span class="opt-desc">File this email now <b>and</b> remember it: pick where it goes, then an existing rule (to extend it) or a new one, so future emails like it file automatically.</span>
               <div class="opt-body">
-                <div class="cat-picker f-root-pick" data-value="">
-                  <input class="cat-search" type="search" dir="auto" autocomplete="off" spellcheck="false"
-                         placeholder="Search roots and rules&hellip;"
-                         title="Filter by root name, folder, rule name, seller or sender">
-                  <div class="cat-grid" role="listbox" aria-label="Roots"></div>
-                  <div class="cat-grid-empty" hidden>No root matches &mdash; create a new one.</div>
-                </div>
-                <input class="f-root-name" type="text" dir="auto" hidden
-                       placeholder="New root name (e.g. חשמל)"
-                       title="Name of the new root — saved together with the rule when you Apply">
-                <div class="rule-pick" hidden>
-                  <span class="rule-pick-lbl">Rule</span>
-                  <div class="rule-chips"></div>
-                </div>
-                <input class="f-rule-name" type="text" dir="auto" hidden
-                       placeholder="New rule name (optional — defaults to the seller)">
+                <section class="step step-root">
+                  <button type="button" class="step-head" title="Show or hide the roots">
+                    <span class="step-num">1</span><span class="step-title">Root</span>
+                    <span class="step-summary" dir="auto"></span>
+                    <span class="step-toggle">change</span>
+                  </button>
+                  <div class="step-body">
+                    <div class="cat-picker f-root-pick" data-value="">
+                      <input class="cat-search" type="search" dir="auto" autocomplete="off" spellcheck="false"
+                             placeholder="Search roots and rules&hellip;"
+                             title="Filter by root name, folder, rule name, seller or sender">
+                      <div class="cat-grid" role="listbox" aria-label="Roots"></div>
+                      <div class="cat-grid-empty" hidden>No root matches &mdash; create a new one.</div>
+                    </div>
+                  </div>
+                  <input class="f-root-name" type="text" dir="auto" hidden
+                         placeholder="New root name (e.g. חשמל)"
+                         title="Name of the new root — saved together with the rule when you Apply">
+                </section>
+                <section class="step step-rule">
+                  <div class="step-head">
+                    <span class="step-num">2</span><span class="step-title">Rule</span>
+                    <span class="step-summary" dir="auto"></span>
+                  </div>
+                  <div class="step-body">
+                    <div class="rule-pick" hidden>
+                      <div class="rule-chips"></div>
+                    </div>
+                    <input class="f-rule-name" type="text" dir="auto" hidden
+                           placeholder="New rule name (optional — defaults to the seller)">
+                    <div class="opt-slot"></div>
+                  </div>
+                </section>
               </div>
-              <div class="opt-slot"></div>
             </div>
             <div class="opt">
               <label class="opt-head"><input type="radio" name="kind" value="exclude"> Exclude as promotional</label>

@@ -576,7 +576,6 @@ main { flex: 1; overflow: hidden; position: relative; }
 .opt-body .f-root-name, .opt-body .f-rule-name { flex: 1 1 100%; max-width: 360px; }
 .rule-pick { flex: 1 1 100%; display: flex; gap: 8px; align-items: flex-start; }
 .rule-pick[hidden] { display: none; }
-.rule-pick-lbl { color: var(--muted); font-size: 11px; padding-top: 5px; flex: none; }
 .rule-chips { display: flex; flex-wrap: wrap; gap: 5px; }
 .rule-chip {
   background: var(--panel); color: var(--muted); border: 1px solid var(--line);
@@ -596,3 +595,48 @@ main { flex: 1; overflow: hidden; position: relative; }
 }
 ::-webkit-scrollbar-thumb:hover { background: #3a4150; background-clip: padding-box; }
 ::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+
+/* ---- Fallbacks: ① Root / ② Rule steps ----------------------------------- */
+.opt-body .step { flex: 1 1 100%; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.step-rule { border-top: 1px solid var(--line); padding-top: 8px; margin-top: 2px; }
+.step-head {
+  display: flex; align-items: baseline; gap: 8px; min-width: 0; text-align: start;
+  background: transparent; border: 0; padding: 0; color: var(--muted); font: inherit; font-size: 11px;
+}
+button.step-head { cursor: pointer; }
+.step-num {
+  display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 50%;
+  border: 1px solid var(--line); font-size: 10px; color: var(--muted); flex: none;
+}
+.step-title { text-transform: uppercase; letter-spacing: .5px; flex: none; }
+.step-summary {
+  color: var(--text); font-size: 12.5px; font-weight: 600; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.step-toggle { color: var(--accent); font-size: 11px; flex: none; }
+.step-toggle[hidden] { display: none; }
+button.step-head:hover .step-toggle { text-decoration: underline; }
+.step.collapsed .step-body { display: none; }
+.step-rule.collapsed .step-summary { color: var(--muted); font-weight: 400; font-style: italic; }
+.step-body { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.step-body > * { flex: 1 1 100%; min-width: 0; }
+.step-body .opt-slot { margin-inline-start: 0; }
+
+/* the options you didn't choose shrink to compact one-line rows */
+.opt:not(.is-selected) .opt-desc,
+.opt:not(.is-selected) .opt-body { display: none; }
+.opt:not(.is-selected) { padding-top: 2px; padding-bottom: 2px; }
+.opt:not(.is-selected) .opt-head { color: var(--muted); font-weight: 400; }
+.fb-kinds { gap: 6px; }
+
+/* ---- Fallbacks: the email's header + the chosen option stay pinned ------ */
+.card.fb { --fbh: 64px; }
+.card.fb .fb-head {
+  position: sticky; top: -16px; z-index: 6;
+  margin-top: -12px; padding: 12px 0 8px;                 /* covers the card's top padding */
+  background: var(--panel);
+}
+.card.fb .opt.is-selected > .opt-head {
+  position: sticky; top: calc(var(--fbh) - 16px); z-index: 5;
+  background: #1a1f28; margin: 0 -6px; padding: 5px 6px; border-radius: 6px;
+}
