@@ -29,6 +29,7 @@ Decision payload (from the Fallbacks form):
 import json
 import os
 import shutil
+import stat
 from pathlib import Path
 
 import receipt_saver
@@ -122,16 +123,57 @@ def _atomic_write_json(path: Path, data) -> None:
     os.replace(tmp, path)
 
 
-def _move_folder(src: Path, dst: Path) -> Path:
+def _clear_read_only(path) -> None:
+    """OneDrive marks the folders it syncs read-only, and Windows refuses to
+    delete a read-only folder ("Access is denied")."""
+    try:
+        os.chmod(path, stat.S_IWRITE | stat.S_IREAD)
+    except OSError:
+        pass
+
+
+def _remove_empty_dir(path: Path):
+    """Remove an emptied folder; returns None, or why it couldn't be removed."""
+    p = Path(path)
+    for attempt in (1, 2):
+        try:
+            p.rmdir()
+            return None
+        except FileNotFoundError:
+            return None
+        except OSError as e:
+            if attempt == 2:
+                return str(e)
+            _clear_read_only(p)
+
+
+def _remove_tree(path: Path):
+    """Delete a folder and everything in it; returns None, or why it failed."""
+    def retry_writable(func, p, _exc):
+        _clear_read_only(p)
+        func(p)                                   # a second failure propagates
+    try:
+        shutil.rmtree(path, onerror=retry_writable)
+        return None
+    except FileNotFoundError:
+        return None
+    except OSError as e:
+        return str(e)
+
+
+def _move_folder(src: Path, dst: Path) -> tuple:
+    """Move src's files into dst and remove the emptied src.
+    Returns (dst, problem) — problem is None or why src couldn't be removed."""
     dst.parent.mkdir(parents=True, exist_ok=True)
     dst.mkdir(exist_ok=True)
     for item in Path(src).iterdir():
         shutil.move(str(item), str(dst / item.name))
-    try:
-        Path(src).rmdir()
-    except OSError:
-        pass
-    return dst
+    return dst, _remove_empty_dir(src)
+
+
+def _leftover_warning(src: Path, problem: str) -> str:
+    return (f"Filed — but the old folder “{Path(src).name}” couldn't be removed from "
+            f"{Path(src).parent.name}: {problem}")
 
 
 def _append_json_list(path: Path, item: dict) -> None:
@@ -230,8 +272,7 @@ def apply_decision(entry: dict, decision: dict, *,
         data = _rules.load(rules_path)
         _rules.add_match(data, _rules.exclude_rule(data)["id"], match)
         _rules.save(data, rules_path)
-        if src.exists():
-            shutil.rmtree(src, ignore_errors=True)
+        problem = _remove_tree(src) if src.exists() else None
         _append_json_list(cleanup_log_path, {
             "action": "DELETED", "folder": entry["folder_name"],
             "reason": "excluded via fallback UI (" + ", ".join(
@@ -241,7 +282,11 @@ def apply_decision(entry: dict, decision: dict, *,
         history.upsert(rec_id, {**_history_base(),
                                 "action": "RESOLVED", "resolution": "exclude"},
                        path=history_path)
-        return {"ok": True, "kind": "exclude"}
+        out = {"ok": True, "kind": "exclude"}
+        if problem:
+            out["warning"] = (f"Excluded — but the folder “{src.name}” couldn't be deleted "
+                              f"from {src.parent.name}: {problem}")
+        return out
 
     seller  = _value(decision.get("seller"), sug_seller)
     product = _value(decision.get("product"), sug_product)
@@ -249,7 +294,7 @@ def apply_decision(entry: dict, decision: dict, *,
     if kind == "once":
         base = Path(decision.get("destination") or receipts_dir)
         dst = compute_destination(entry, base, seller, product)
-        moved = _move_folder(src, dst) if src.exists() else dst
+        moved, problem = _move_folder(src, dst) if src.exists() else (dst, None)
         _resolve(str(moved))
         history.upsert(rec_id, {
             **_history_base(), "action": "RESOLVED", "resolution": "once",
@@ -257,7 +302,10 @@ def apply_decision(entry: dict, decision: dict, *,
             "product": receipt_saver.sanitize(product),
             "folder_name": moved.name, "folder_path": str(moved),
         }, path=history_path)
-        return {"ok": True, "kind": "once", "dest": str(moved)}
+        out = {"ok": True, "kind": "once", "dest": str(moved)}
+        if problem:
+            out["warning"] = _leftover_warning(src, problem)
+        return out
 
     if kind not in ("rule", "new_rule"):
         return {"ok": False, "error": f"unknown decision kind {kind!r}"}
@@ -292,7 +340,7 @@ def apply_decision(entry: dict, decision: dict, *,
 
     folder = _rules.destination_of(rule, data)
     dst = compute_destination(entry, folder, seller, product)
-    moved = _move_folder(src, dst) if src.exists() else dst
+    moved, problem = _move_folder(src, dst) if src.exists() else (dst, None)
     _resolve(str(moved))
     root = _rules.find_root(data, rule.get("root")) or {}
     history.upsert(rec_id, {
@@ -304,5 +352,8 @@ def apply_decision(entry: dict, decision: dict, *,
         "root_id": root.get("id"), "root_name": root.get("name"),
         "folder_name": moved.name, "folder_path": str(moved),
     }, path=history_path)
-    return {"ok": True, "kind": kind, "rule_id": rule["id"], "root_id": root.get("id"),
-            "dest": str(moved)}
+    out = {"ok": True, "kind": kind, "rule_id": rule["id"], "root_id": root.get("id"),
+           "dest": str(moved)}
+    if problem:
+        out["warning"] = _leftover_warning(src, problem)
+    return out

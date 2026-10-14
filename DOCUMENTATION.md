@@ -401,6 +401,14 @@ named with; `every_mail` / `extract` only shape what a **new** rule remembers.
 - `once` — move + rename into the chosen destination; no rule is written.
 - `exclude` — add the match rule to the shared `excluded` rule, delete the
   folder, log to `cleanup_log.json`, mark resolved.
+Moving a folder moves its files, then removes the emptied folder from
+`_לטיפול ידני`. OneDrive marks the folders it syncs **read-only**, and Windows
+refuses to delete a read-only folder (`Access is denied`), so the read-only flag
+is cleared and the removal retried (`_remove_empty_dir`; `exclude` deletes via
+`_remove_tree` with the same retry). If a folder still can't be removed, the
+receipt is filed anyway and the result carries a `warning` the UI shows as a
+toast — before v1.1.37 this failure was silently ignored, which left empty
+folders behind and made filed emails look unmoved.
 - `skip` — **dismiss**: mark resolved and record `resolution: dismissed` in
   History; the folder stays in `_לטיפול ידני` and nothing is remembered, so a
   similar mail later lands in fallbacks again.

@@ -1223,6 +1223,7 @@ async function wireForm(scope, it, s) {
     if (res && res.ok) {
       form.closest(".card").remove();
       toast(kind === "skip" ? "Removed from the list" : `Resolved: ${st.seller.value || it.subject}`);
+      if (res.warning) toast(res.warning, true);   // e.g. the old folder couldn't be removed
       if (kind !== "skip" && kind !== "once") rulesChanged();
       loadFallbacks();
       refreshHistory();

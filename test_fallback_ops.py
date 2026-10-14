@@ -196,6 +196,37 @@ class TestApplyDecision(_Base):
                          / "email.pdf").exists())
         self.assertEqual(self._entry()["resolved_by"], "claude")
 
+    # OneDrive marks the folders it syncs read-only; Windows refuses to delete a
+    # read-only folder, which used to leave an empty folder in _לטיפול ידני.
+    def _make_src_read_only(self):
+        import os, stat
+        os.chmod(self.src, stat.S_IREAD)
+        self.addCleanup(lambda: self.src.exists() and os.chmod(self.src, stat.S_IWRITE))
+
+    def test_read_only_source_folder_is_removed_after_filing(self):
+        self._make_src_read_only()
+        res = self.apply({"kind": "new_rule", "rule_name": "שופ", "root_id": "main",
+                          "seller": name("שופ"), "product": name("חשבונית"),
+                          "match": {"sender_contains": "shop.co.il"}})
+        self.assertTrue(res["ok"])
+        self.assertTrue((Path(res["dest"]) / "email.pdf").exists())
+        self.assertFalse(self.src.exists())
+        self.assertNotIn("warning", res)
+
+    def test_read_only_source_folder_is_removed_on_exclude(self):
+        self._make_src_read_only()
+        self.assertTrue(self.apply({"kind": "exclude",
+                                    "match": {"sender_contains": "shop.co.il"}})["ok"])
+        self.assertFalse(self.src.exists())
+
+    def test_leftover_folder_is_reported_not_silently_ignored(self):
+        from unittest import mock
+        with mock.patch.object(Path, "rmdir", side_effect=PermissionError("in use")):
+            res = self.apply({"kind": "once", "seller": {"value": "a"}, "product": {"value": "b"}})
+        self.assertTrue(res["ok"])                       # the receipt itself was filed
+        self.assertIn("in use", res["warning"])
+        self.assertIn(self.src.name, res["warning"])
+
     def test_exclude_adds_to_shared_rule_and_deletes_folder(self):
         self.apply({"kind": "exclude",
                     "match": {"sender_contains": "shop.co.il", "subject_contains": "פרסומת"}})
