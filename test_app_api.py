@@ -373,6 +373,21 @@ class TestRulesApi(unittest.TestCase):
         self.assertFalse(res["ok"])
         self.assertIn("offline", res["error"])
 
+    def test_preview_template(self):
+        api = self._api()
+        self.assertEqual(api.preview_template("m1", "{sender_name} {subject_first_word} {year}"),
+                         {"ok": True, "value": "IEC חשבון 2026"})
+        self.assertEqual(api.preview_template("m1", "{subject_word:9}"), {"ok": True, "value": ""})
+        bad = api.preview_template("m1", "{nope}")
+        self.assertFalse(bad["ok"])
+        self.assertIn("nope", bad["error"])
+
+    def test_preview_rule_with_template_uses_the_mail_date(self):
+        import rules as R
+        api = self._api()
+        api.rule_update("elec", {"product": {"mode": "template", "template": "{month}_{year}"}})
+        self.assertEqual(api.preview_rule("m1", "elec")["product"], "08_2026")
+
     def test_preview_rule_resolves_names_for_this_mail(self):
         res = self._api().preview_rule("m1", "elec")
         self.assertEqual(res, {"ok": True, "seller": "אלקטרה", "product": "03_2026",

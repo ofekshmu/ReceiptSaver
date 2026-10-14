@@ -132,6 +132,27 @@ class TestApplyDecision(_Base):
         self.assertEqual((row["rule_name"], row["root_name"]), ("שופ", "קבלות"))
         self.assertRegex(row["resolved_at"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d$")
 
+    def test_new_rule_with_template_names(self):
+        res = self.apply({
+            "kind": "new_rule", "rule_name": "shop", "root_id": "main",
+            "seller": {"value": "Shop", "template": "{sender_company}"},
+            "product": {"value": "mystery", "template": "{subject_first_word} {year}"},
+            "match": {"sender_contains": "shop.co.il"},
+        })
+        self.assertTrue(res["ok"])
+        rule = self._rule(res["rule_id"])
+        self.assertEqual(rule["seller"], {"mode": "template", "template": "{sender_company}"})
+        self.assertEqual(rule["product"], {"mode": "template", "template": "{subject_first_word} {year}"})
+        self.assertTrue((self.receipts / "2026_08_25 - Shop - mystery - ofek").exists())
+
+    def test_bad_template_is_rejected_before_anything_moves(self):
+        res = self.apply({"kind": "new_rule", "rule_name": "x", "root_id": "main",
+                          "seller": {"value": "x", "template": "{nope}"},
+                          "product": {"value": "y"}, "match": {"sender_contains": "shop.co.il"}})
+        self.assertFalse(res["ok"])
+        self.assertIn("nope", res["error"])
+        self.assertTrue(self.src.exists())
+
     def test_new_rule_in_new_root(self):
         folder = self.receipts / "קניות"
         res = self.apply({

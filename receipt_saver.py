@@ -472,7 +472,8 @@ def process_message(msg: dict, account: dict, run_id: str = "") -> dict:
         seller  = sanitize(m.group(1).strip()) if m else "iCount"
         product = "חשבונית מס קבלה"
         cat_match = rules.match_rule(sender, subject,
-                                     attachment_count=msg.get("attachment_count"))
+                                     attachment_count=msg.get("attachment_count"),
+                                     date=date_str)
         base_dir  = (cat_match[2] if cat_match and cat_match[0] != rules.EXCLUDE
                      else RECEIPTS_DIR)
         category  = _category_label(base_dir)
@@ -510,7 +511,8 @@ def process_message(msg: dict, account: dict, run_id: str = "") -> dict:
     # ── Step 2: rules ──────────────────────────────────────────────────
     body   = msg["body_text"]
     custom = rules.match_rule(sender, subject, body,
-                              attachment_count=msg.get("attachment_count"))
+                              attachment_count=msg.get("attachment_count"),
+                              date=date_str)
     if custom:
         seller, product, base_dir = custom
         if seller == rules.EXCLUDE:

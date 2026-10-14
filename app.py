@@ -350,6 +350,20 @@ class Api:
             out["body_error"] = body_error
         return out
 
+    def preview_template(self, message_id: str, template: str) -> dict:
+        """Fill a seller/product template for one fallback mail, exactly as the
+        scan would. value is "" when the template comes out empty."""
+        import rules as R
+        entry = self._fallback_by_id(message_id)
+        if not entry:
+            return {"ok": False, "error": "entry not found"}
+        try:
+            R.validate_template(template)
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
+        return {"ok": True, "value": R.render_template(template, entry.get("sender", ""),
+                                                        entry.get("subject", ""), entry.get("date"))}
+
     def preview_rule(self, message_id: str, rule_id: str) -> dict:
         """What an existing rule would name and file this mail as."""
         import rules as R
@@ -365,7 +379,7 @@ class Api:
             except Exception:
                 body = ""                     # offline: fall back to the suggestion
         seller, product = R.resolve_names(rule, entry.get("sender", ""),
-                                          entry.get("subject", ""), body)
+                                          entry.get("subject", ""), body, entry.get("date"))
         return {"ok": True, "seller": seller, "product": product,
                 "destination": str(R.destination_of(rule, data))}
 

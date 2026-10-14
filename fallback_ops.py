@@ -17,7 +17,8 @@ Decision payload (from the Fallbacks form):
      "root_id": str | "new_root": {"name", "folder"},     # new_rule
      "destination": str,                                  # once
      "seller":  {"value": str, "every_mail": bool,
-                 "extract": null | {"source", "regex", "fallback"}},
+                 "extract": null | {"source", "regex", "fallback"},
+                 "template": null | str},
      "product": {...same...},
      "match":   {"sender_contains", "subject_contains",
                  "exclude_subject_contains", "body_contains"}}
@@ -85,7 +86,8 @@ def suggest(entry: dict, rules_path: Path = None, receipts_dir: Path = None) -> 
 
     known = _sender_rule(sender, data)
     if known:
-        seller, product = _rules.resolve_names(known, sender, subject)
+        seller, product = _rules.resolve_names(known, sender, subject,
+                                               date=entry.get("date"))
         destination = _rules.destination_of(known, data)
         confidence, rule_id, root_id = "high", known["id"], known.get("root")
     else:
@@ -210,6 +212,8 @@ def compute_destination(entry: dict, base: Path, seller: str, product: str) -> P
 def spec_from(field: dict):
     """The seller/product spec a new rule stores for one form field."""
     field = field or {}
+    if (field.get("template") or "").strip():
+        return _rules.validate_spec({"mode": "template", "template": field["template"]})
     ex = field.get("extract")
     if ex:
         return _rules.validate_spec({"mode": "extract", "source": ex.get("source"),

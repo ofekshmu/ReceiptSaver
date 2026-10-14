@@ -111,6 +111,15 @@ class TestRuleRouting(unittest.TestCase):
         self.assertEqual(Path(rec["folder_path"]).parent, self.dest)
         self.assertEqual(rec["rule_source"], "custom")
 
+    def test_template_names_use_the_mail_date(self):
+        import json, rules
+        data = json.loads(rules.RULES_FILE.read_text(encoding="utf-8"))
+        data["rules"][0]["product"] = {"mode": "template", "template": "חשבון {month}-{year}"}
+        rules.RULES_FILE.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        res = receipt_saver.process_message(self._msg("bill@iectest.co.il", "חשבון 1"),
+                                            {"label": "ofek", "email": "o@x"})
+        self.assertEqual(res["record"]["product"], "חשבון 07-2026")
+
     def test_exclude(self):
         res = receipt_saver.process_message(self._msg("x@spam.example", "מבצע ענק"),
                                             {"label": "ofek", "email": "o@x"})

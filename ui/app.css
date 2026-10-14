@@ -271,6 +271,27 @@ main { flex: 1; overflow: hidden; position: relative; }
 .nf-x-toggle:hover { color: var(--text); border-color: var(--accent); }
 .nf-x-toggle.on { color: var(--accent); border-color: var(--accent); }
 .nf-x-toggle[hidden] { display: none; }
+.nf-t-toggle {
+  background: transparent; color: var(--muted); border: 1px solid var(--line);
+  border-radius: 6px; padding: 4px 8px; font-size: 11px; cursor: pointer; white-space: nowrap;
+}
+.nf-t-toggle:hover { color: var(--text); border-color: var(--accent); }
+.nf-t-toggle.on { color: var(--accent); border-color: var(--accent); }
+.nf-t-toggle[hidden], .nf-value[hidden] { display: none; }
+.nf-template { display: flex; flex-direction: column; gap: 5px; }
+.nf-template[hidden] { display: none; }
+.nf-tpl { font-family: Consolas, "Cascadia Mono", monospace; }
+.nf-tokens { display: flex; flex-wrap: wrap; gap: 4px; }
+.nf-token {
+  background: var(--panel); color: var(--muted); border: 1px solid var(--line);
+  border-radius: 11px; padding: 1px 8px; font-size: 11px; cursor: pointer;
+}
+.nf-token:hover { color: var(--text); border-color: var(--accent); }
+.nf-tpreview { font-size: 11px; color: var(--muted); }
+.nf-tpreview[hidden] { display: none; }
+.nf-tpreview.good { color: var(--ok); }
+.nf-tpreview.warn { color: var(--warn); }
+.nf-tpreview.bad { color: var(--bad); }
 .nf-extract { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .nf-extract[hidden] { display: none; }
 .nf-regex { flex: 1 1 160px; font-family: Consolas, "Cascadia Mono", monospace; }

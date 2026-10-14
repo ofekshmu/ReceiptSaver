@@ -514,23 +514,82 @@ async function makeDestPicker(root, current) {
 // A value, a "use for every mail" tick, or an extraction rule (source + regex)
 // with a live preview. preview(source, regex) -> {ok, value, error}; omit it
 // where there is no mail to test against (Categories tab).
-function makeNameField(slot, { spec, value, preview }) {
+// Template tokens for seller/product (rules.TEMPLATE_TOKENS); `insert` is what a
+// click puts in the template box.
+const NF_TOKENS = [
+  { insert: "{sender_name}", label: "sender name" },
+  { insert: "{sender_company}", label: "sender company" },
+  { insert: "{sender_domain}", label: "sender domain" },
+  { insert: "{sender_address}", label: "sender address" },
+  { insert: "{subject}", label: "subject" },
+  { insert: "{subject_no_numbers}", label: "subject w/o numbers" },
+  { insert: "{subject_first_word}", label: "1st word" },
+  { insert: "{subject_word:2}", label: "word N" },
+  { insert: "{subject_words:2-4}", label: "words A–B" },
+  { insert: "{year}", label: "year" },
+  { insert: "{month}", label: "month" },
+];
+
+function makeNameField(slot, { spec, value, preview, previewTemplate }) {
   const n = $("#tpl-namefield").content.cloneNode(true).querySelector(".nf");
   slot.innerHTML = "";
   slot.appendChild(n);
   const val = $(".nf-value", n), every = $(".nf-every-cb", n), everyLbl = $(".nf-every", n);
   const xbtn = $(".nf-x-toggle", n), xbox = $(".nf-extract", n);
   const src = $(".nf-source", n), rx = $(".nf-regex", n), out = $(".nf-preview", n);
-  let extractOn = false, simple = false, lastHit = null, timer = 0, seq = 0;
+  const tbtn = $(".nf-t-toggle", n), tbox = $(".nf-template", n);
+  const tpl = $(".nf-tpl", n), tout = $(".nf-tpreview", n);
+  let extractOn = false, tplOn = false, simple = false, lastHit = null, timer = 0, seq = 0;
+  let lastTpl = "", tTimer = 0, tSeq = 0;
 
   function paint() {
     xbox.hidden = !extractOn || simple;
     xbtn.classList.toggle("on", extractOn);
     xbtn.hidden = simple;
-    everyLbl.hidden = simple || extractOn;
+    tbox.hidden = !tplOn || simple;
+    tbtn.classList.toggle("on", tplOn);
+    tbtn.hidden = simple;
+    val.hidden = tplOn && !simple;                  // the template decides the name
+    everyLbl.hidden = simple || extractOn || tplOn;
     val.placeholder = extractOn && !simple ? "If no match (blank = app suggestion)" : "";
     out.hidden = !preview;
+    tout.hidden = !previewTemplate;
   }
+
+  // token chips: click inserts at the cursor
+  for (const t of NF_TOKENS) {
+    const c = document.createElement("button");
+    c.type = "button"; c.className = "nf-token"; c.textContent = t.label; c.title = t.insert;
+    c.addEventListener("mousedown", e => e.preventDefault());   // keep the cursor in the box
+    c.addEventListener("click", () => {
+      const a = tpl.selectionStart ?? tpl.value.length, b = tpl.selectionEnd ?? a;
+      tpl.value = tpl.value.slice(0, a) + t.insert + tpl.value.slice(b);
+      tpl.focus();
+      tpl.setSelectionRange(a + t.insert.length, a + t.insert.length);
+      scheduleTpl();
+    });
+    $(".nf-tokens", n).appendChild(c);
+  }
+  async function runTplPreview() {
+    if (!previewTemplate || !tplOn) return;
+    const mine = ++tSeq;
+    if (!tpl.value.trim()) { tout.textContent = ""; tout.className = "nf-tpreview"; lastTpl = ""; return; }
+    let res;
+    try { res = await previewTemplate(tpl.value); } catch (e) { res = { ok: false, error: String(e) }; }
+    if (mine !== tSeq) return;
+    lastTpl = res && res.ok ? (res.value || "") : "";
+    if (!res || !res.ok) { tout.textContent = (res && res.error) || "preview failed"; tout.className = "nf-tpreview bad"; }
+    else if (res.value) { tout.textContent = "→ " + res.value; tout.className = "nf-tpreview good"; }
+    else { tout.textContent = "comes out empty for this email — uses the app suggestion"; tout.className = "nf-tpreview warn"; }
+  }
+  const scheduleTpl = () => { clearTimeout(tTimer); tTimer = setTimeout(runTplPreview, 250); };
+  tpl.addEventListener("input", scheduleTpl);
+  tbtn.addEventListener("click", () => {
+    tplOn = !tplOn;
+    if (tplOn) extractOn = false;
+    paint();
+    if (tplOn) { tpl.focus(); scheduleTpl(); }
+  });
   async function runPreview() {
     if (!preview || !extractOn) return;
     const mine = ++seq;
@@ -547,15 +606,25 @@ function makeNameField(slot, { spec, value, preview }) {
   }
   const schedule = () => { clearTimeout(timer); timer = setTimeout(runPreview, 250); };
 
-  xbtn.addEventListener("click", () => { extractOn = !extractOn; paint(); if (extractOn) { rx.focus(); schedule(); } });
+  xbtn.addEventListener("click", () => {
+    extractOn = !extractOn;
+    if (extractOn) tplOn = false;
+    paint();
+    if (extractOn) { rx.focus(); schedule(); }
+  });
   rx.addEventListener("input", schedule);
   src.addEventListener("change", schedule);
   val.addEventListener("input", () => { if (extractOn && !lastHit) schedule(); });
 
   function load(sp, v) {
-    // spec: fixed / extract / null ("app suggestion" → unticked) / undefined (fresh → ticked)
+    // spec: fixed / extract / template / null ("app suggestion" → unticked) / undefined (fresh → ticked)
     extractOn = !!(sp && sp.mode === "extract");
+    tplOn = !!(sp && sp.mode === "template");
+    tpl.value = tplOn ? sp.template || "" : "";
+    lastTpl = "";
+    tout.textContent = "";
     if (sp && sp.mode === "fixed") { val.value = sp.value || ""; every.checked = true; }
+    else if (tplOn) { val.value = v || ""; every.checked = true; }
     else if (extractOn) {
       src.value = sp.source || "subject"; rx.value = sp.regex || "";
       val.value = sp.fallback || ""; every.checked = true;
@@ -564,6 +633,7 @@ function makeNameField(slot, { spec, value, preview }) {
     lastHit = null; out.textContent = "";
     paint();
     if (extractOn) schedule();
+    if (tplOn) scheduleTpl();
   }
   load(spec, value);
 
@@ -574,6 +644,10 @@ function makeNameField(slot, { spec, value, preview }) {
     get value() { return val.value.trim(); },
     // what THIS mail is named with + how a new rule should remember it
     field() {
+      if (tplOn && !simple) {
+        // this mail gets the previewed result ("" → the server uses the suggestion)
+        return { value: lastTpl, every_mail: true, extract: null, template: tpl.value.trim() };
+      }
       if (extractOn && !simple) {
         return { value: lastHit || val.value.trim(), every_mail: true,
                  extract: { source: src.value, regex: rx.value, fallback: val.value.trim() } };
@@ -582,6 +656,7 @@ function makeNameField(slot, { spec, value, preview }) {
     },
     // the spec to store on a rule (Rules tab)
     spec() {
+      if (tplOn) return { mode: "template", template: tpl.value.trim() };
       if (extractOn) {
         const s = { mode: "extract", source: src.value, regex: rx.value };
         if (val.value.trim()) s.fallback = val.value.trim();
@@ -595,6 +670,7 @@ function makeNameField(slot, { spec, value, preview }) {
 function specSummary(sp) {
   if (!sp) return "app suggestion";
   if (sp.mode === "fixed") return sp.value;
+  if (sp.mode === "template") return sp.template;
   const where = { subject: "subject", body: "body", sender_name: "sender name" }[sp.source] || sp.source;
   return `from ${where}`;
 }
@@ -1079,10 +1155,13 @@ function applyFieldsForKind(form) {
 async function wireForm(scope, it, s) {
   const form = $(".fb-form", scope);
   const st = form._fb = {};
+  const previewTemplate = t => api().preview_template(it.message_id, t);
   st.seller = makeNameField($(".fd-seller .nf-slot", form), {
-    value: s.seller, preview: (src, rx) => api().preview_extract(it.message_id, src, rx) });
+    value: s.seller, preview: (src, rx) => api().preview_extract(it.message_id, src, rx),
+    previewTemplate });
   st.product = makeNameField($(".fd-product .nf-slot", form), {
-    value: s.product, preview: (src, rx) => api().preview_extract(it.message_id, src, rx) });
+    value: s.product, preview: (src, rx) => api().preview_extract(it.message_id, src, rx),
+    previewTemplate });
   st.match = makeMatchRule($(".fd-match .mr-slot", form), {
     entry: { sender_contains: s.match_sender_contains },
     attachmentHint: s.attachment_count,

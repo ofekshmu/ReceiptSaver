@@ -25,8 +25,11 @@ docs/superpowers/specs/2026-10-07-rules-and-roots-design.md.
 
 `match` is an OR-list of alternatives; an alternative matches when ALL its
 conditions hold. A seller/product *spec* is fixed text, a regex extraction
-(subject / body / sender name, optional fallback), or null (= the app's
-suggestion, `naming.suggest_names`). First matching rule wins (file order).
+(subject / body / sender name, optional fallback), a template
+(`{"mode": "template", "template": "{sender_name} - {subject_words:2-4}"}`,
+see TEMPLATE_TOKENS — one rule can then name each mail differently), or null
+(= the app's suggestion, `naming.suggest_names`). First matching rule wins
+(file order).
 Exclude rules have `root: null`.
 """
 
@@ -155,10 +158,88 @@ def extract(source: str, regex: str, sender: str, subject: str, body: str):
     return value or None
 
 
-def resolve_spec(spec, sender: str, subject: str, body: str, suggestion: str) -> str:
+# ---- templates: "{sender_name} - {subject_words:8-10}" -----------------------
+# Each token is replaced with a piece of the email; plain text is kept as is.
+TEMPLATE_TOKENS = ("sender_name", "sender_company", "sender_domain", "sender_address",
+                   "subject", "subject_no_numbers", "subject_first_word",
+                   "subject_word", "subject_words", "year", "month")
+_TOKEN_RE = re.compile(r"\{([a-z_]+)(?::([^{}]*))?\}")
+_ARG_TOKENS = {"subject_word": r"[1-9]\d*", "subject_words": r"[1-9]\d*-[1-9]\d*"}
+
+
+def _check_token(name: str, arg) -> None:
+    if name not in TEMPLATE_TOKENS:
+        raise ValueError(f"unknown token {{{name}}} — use one of: "
+                         + ", ".join("{" + t + "}" for t in TEMPLATE_TOKENS))
+    pattern = _ARG_TOKENS.get(name)
+    if pattern is None:
+        if arg is not None:
+            raise ValueError(f"{{{name}}} takes no ':' argument")
+        return
+    if arg is None or not re.fullmatch(pattern, arg):
+        hint = "{subject_word:N}" if name == "subject_word" else "{subject_words:A-B}"
+        raise ValueError(f"{{{name}:{arg or ''}}} — write it as {hint} (words count from 1)")
+    if name == "subject_words":
+        a, b = (int(x) for x in arg.split("-"))
+        if a > b:
+            raise ValueError(f"{{subject_words:{arg}}} — the range must go up (A-B with A ≤ B)")
+
+
+def validate_template(template: str) -> str:
+    t = (template or "").strip()
+    if not t:
+        raise ValueError("the template is empty")
+    for m in _TOKEN_RE.finditer(t):
+        _check_token(m.group(1), m.group(2))
+    return t
+
+
+def render_template(template: str, sender: str, subject: str, date: str = None) -> str:
+    """Fill a template for one mail; folder-safe; "" when nothing came out."""
+    words = (subject or "").split()
+    ymd = re.match(r"(\d{4})[-_](\d{2})", str(date or ""))
+
+    def value(m):
+        name, arg = m.group(1), m.group(2)
+        if name == "sender_name":
+            return naming.display_name(sender)
+        if name == "sender_company":
+            return naming.seller_from_domain(naming.registered_domain(sender))
+        if name == "sender_domain":
+            return naming.registered_domain(sender)
+        if name == "sender_address":
+            hit = re.search(r"[\w.+-]+@[\w.-]+", sender or "")
+            return hit.group(0).lower() if hit else ""
+        if name == "subject":
+            return subject or ""
+        if name == "subject_no_numbers":
+            return " ".join(w for w in words if not any(ch.isdigit() for ch in w))
+        if name == "subject_first_word":
+            return words[0] if words else ""
+        if name == "subject_word":
+            i = int(arg or 0)
+            return words[i - 1] if 1 <= i <= len(words) else ""
+        if name == "subject_words":
+            a, b = (int(x) for x in (arg or "0-0").split("-"))
+            return " ".join(words[max(a, 1) - 1:b])
+        if name == "year":
+            return ymd.group(1) if ymd else ""
+        if name == "month":
+            return ymd.group(2) if ymd else ""
+        return ""
+
+    out = naming.sanitize(_TOKEN_RE.sub(value, template or ""))
+    # tidy what empty tokens leave behind ("Grow - " -> "Grow")
+    return re.sub(r"\s+", " ", out).strip(" -–—_·|,")
+
+
+def resolve_spec(spec, sender: str, subject: str, body: str, suggestion: str,
+                 date: str = None) -> str:
     """The value a spec yields for one mail; never raises, never empty."""
     if spec and spec.get("mode") == "fixed" and (spec.get("value") or "").strip():
         return spec["value"].strip()
+    if spec and spec.get("mode") == "template":
+        return render_template(spec.get("template") or "", sender, subject, date) or suggestion
     if spec and spec.get("mode") == "extract":
         try:
             hit = extract(spec.get("source"), spec.get("regex") or "", sender, subject, body)
@@ -180,6 +261,8 @@ def validate_spec(spec):
     if mode == "fixed":
         value = (spec.get("value") or "").strip()
         return {"mode": "fixed", "value": value} if value else None
+    if mode == "template":
+        return {"mode": "template", "template": validate_template(spec.get("template"))}
     if mode == "extract":
         source, regex = spec.get("source"), spec.get("regex") or ""
         if source not in SOURCES:
@@ -197,11 +280,12 @@ def validate_spec(spec):
     raise ValueError(f"unknown mode {mode!r}")
 
 
-def resolve_names(rule: dict, sender: str, subject: str, body: str = "") -> tuple:
+def resolve_names(rule: dict, sender: str, subject: str, body: str = "",
+                  date: str = None) -> tuple:
     """(seller, product) a rule yields for one mail."""
     sug_seller, sug_product = naming.suggest_names(sender, subject)
-    return (resolve_spec(rule.get("seller"), sender, subject, body, sug_seller),
-            resolve_spec(rule.get("product"), sender, subject, body, sug_product))
+    return (resolve_spec(rule.get("seller"), sender, subject, body, sug_seller, date),
+            resolve_spec(rule.get("product"), sender, subject, body, sug_product, date))
 
 
 def needs_body(rule: dict) -> bool:
@@ -443,7 +527,7 @@ def find_match(sender: str, subject: str = "", body: str = "",
 
 
 def match_rule(sender: str, subject: str = "", body: str = "",
-               data: dict = None, attachment_count: int = None):
+               data: dict = None, attachment_count: int = None, date: str = None):
     """`(seller, product, folder)` for the first matching rule — `folder` a
     Path — or `(EXCLUDE, None, None)` for an exclude rule, or None."""
     data = data if data is not None else load()
@@ -452,7 +536,7 @@ def match_rule(sender: str, subject: str = "", body: str = "",
         return None
     if rule.get("exclude"):
         return EXCLUDE, None, None
-    seller, product = resolve_names(rule, sender, subject, body)
+    seller, product = resolve_names(rule, sender, subject, body, date)
     return seller, product, destination_of(rule, data)
 
 

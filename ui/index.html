@@ -217,6 +217,15 @@
         </label>
         <button type="button" class="nf-x-toggle"
                 title="Pull this name out of each email with a rule (regex) instead of a fixed value">&#9881; Extract</button>
+        <button type="button" class="nf-t-toggle"
+                title="Build this name from parts of each email (sender, subject words, date…) — one rule can then name every email differently">{ } Template</button>
+      </div>
+      <div class="nf-template" hidden>
+        <input class="nf-tpl" dir="auto" spellcheck="false" autocomplete="off"
+               placeholder="e.g. {sender_name} or {subject_words:2-4}"
+               title="Text with tokens — click a token below to insert it where the cursor is">
+        <div class="nf-tokens"></div>
+        <span class="nf-tpreview" dir="auto"></span>
       </div>
       <div class="nf-extract" hidden>
         <select class="nf-source" title="Which part of the email the rule reads">
