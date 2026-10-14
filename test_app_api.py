@@ -315,6 +315,12 @@ class TestRulesApi(unittest.TestCase):
         self.assertTrue(api.rule_delete(rid)["ok"])
         self.assertFalse(api.rule_add("x", {"root": "ghost"})["ok"])
 
+    def test_rule_add_with_alternatives(self):
+        res = self._api().rule_add("מים", {"root": "elec", "match": [{"sender_contains": "water.co.il"}]})
+        self.assertTrue(res["ok"])
+        self.assertEqual(next(r for r in self._read()["rules"] if r["name"] == "מים")["match"],
+                         [{"sender_contains": "water.co.il"}])
+
     def test_update_with_bad_regex_reports_error_and_writes_nothing(self):
         before = self._read()
         res = self._api().rule_update("elec", {"product": {

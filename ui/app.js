@@ -1862,10 +1862,11 @@ async function showVersion() {
 }
 
 // ---- Rules view ------------------------------------------------------
-// Grouped by root (colour, name, folder, rule count, edit / ＋ New rule /
-// delete), then an "Excluded" group. Each rule row: name, summary, root select,
-// merge, save, delete, ▸ editor (seller/product + match alternatives).
+// Two panes: roots on the left, the selected root's rules as cards on the
+// right. Editing happens in a side panel that slides over the rules, so the
+// list never grows or jumps; only the panel scrolls when a rule is long.
 let RV = { roots: [], rules: [], counts: {} };
+let rvSel = null;                       // root id | RV_EXCLUDED | RV_NOROOT
 const RV_EXCLUDED = "__excluded__";
 const RV_NOROOT = "__noroot__";
 
@@ -1873,269 +1874,373 @@ async function rulesLoad() {
   try { RV = await api().list_rules(); }
   catch (_) { RV = { roots: [], rules: [], counts: {} }; }
   await loadDests();
-  rulesRender();
+  if (rvSel === null) {
+    try { rvSel = (await api().get_ui_state()).rules_root || ""; } catch (_) { rvSel = ""; }
+  }
+  rvRender();
 }
 
-function rulesAfterWrite(res, okMsg) {
+function rvApply(res, okMsg) {
   toast(res.ok ? okMsg : (res.error || "Failed"), !res.ok);
   if (!res.ok) return false;
   RV = { ...res.data, counts: countsOf(res.data) };
   rulesChanged();
-  loadDests().then(rulesRender);
+  loadDests().then(rvRender);
   return true;
 }
 
-function rulesRender() {
-  const list = $("#rules-list");
-  const open = new Set($$(".cat-editor:not([hidden])", list).map(e => e.closest(".cat").dataset.id));
-  list.innerHTML = "";
-  $("#rules-empty").hidden = RV.rules.length + RV.roots.length > 0;
-  const rootIds = new Set(RV.roots.map(r => r.id));
-  for (const root of RV.roots)
-    list.appendChild(rootGroupEl(root, RV.rules.filter(r => !r.exclude && r.root === root.id), open));
-  const orphans = RV.rules.filter(r => !r.exclude && !rootIds.has(r.root));
-  if (orphans.length)
-    list.appendChild(rootGroupEl({ id: RV_NOROOT, name: "No root (files into קבלות)", folder: "", color: "" },
-                                 orphans, open));
-  const excl = RV.rules.filter(r => r.exclude);
-  if (excl.length)
-    list.appendChild(rootGroupEl({ id: RV_EXCLUDED, name: "Excluded", folder: "", color: "" }, excl, open));
-  rulesFilter();
+function rvGroups() {
+  const ids = new Set(RV.roots.map(r => r.id));
+  const groups = RV.roots.map(r => ({ ...r, rules: RV.rules.filter(x => !x.exclude && x.root === r.id) }));
+  const orphans = RV.rules.filter(x => !x.exclude && !ids.has(x.root));
+  if (orphans.length) groups.push({ id: RV_NOROOT, name: "No root", folder: "", special: true,
+                                    note: "These rules file into קבלות", rules: orphans });
+  const excl = RV.rules.filter(x => x.exclude);
+  if (excl.length) groups.push({ id: RV_EXCLUDED, name: "Excluded", folder: "", special: true,
+                                 note: "Matching mail is skipped — not a receipt", rules: excl });
+  return groups;
 }
 
-function rulesFilter() {
+function rvSelect(id) {
+  rvSel = id;
+  try { api().set_ui_state({ rules_root: id }); } catch (_) {}
+  rvRender();
+}
+
+const el = (tag, cls, text) => {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text != null) e.textContent = text;
+  return e;
+};
+const bdiOf = (text, cls) => { const b = el("bdi", cls, text); return b; };
+
+function ruleHay(r) {
+  return [r.name, specSummary(r.seller), specSummary(r.product),
+          ...(r.match || []).flatMap(m => Object.values(m).flatMap(asList))].join(" ").toLowerCase();
+}
+
+function rvRender() {
   const q = $("#rules-search").value.trim().toLowerCase();
-  for (const g of $$(".root-group", $("#rules-list"))) {
-    const groupHit = !q || (g.dataset.hay || "").includes(q);
-    let shown = 0;
-    for (const row of $$(".cat", g)) {
-      const vis = groupHit || (row.dataset.hay || "").includes(q);
-      row.hidden = !vis;
-      if (vis) shown++;
-    }
-    g.hidden = !!q && !groupHit && shown === 0;
-  }
-}
-$("#rules-search").addEventListener("input", rulesFilter);
+  const groups = rvGroups();
+  if (!groups.some(g => g.id === rvSel)) rvSel = groups.length ? groups[0].id : "";
+  const hits = q ? new Map(groups.map(g => [g.id, g.rules.filter(r =>
+    ruleHay(r).includes(q) || [g.name, g.folder].join(" ").toLowerCase().includes(q))])) : null;
 
-// colour swatches + name + folder; used for ＋ New root and for editing a root
-async function rootEditor(host, { root, onSave, onCancel }) {
-  const ed = $("#tpl-root-editor").content.cloneNode(true).querySelector(".root-editor");
-  host.innerHTML = "";
-  host.appendChild(ed);
-  const nameEl = $(".re-name", ed);
-  nameEl.value = root ? root.name : "";
-  const folder = await makeDestPicker($(".re-folder", ed), root ? root.folder : "");
-  let color = root ? root.color : null;
-  const sw = $(".re-colors", ed);
-  for (const c of PASTELS) {
-    const b = document.createElement("button");
+  // left: the roots
+  const rail = $("#rv-rail");
+  rail.innerHTML = "";
+  for (const g of groups) {
+    const b = el("button", "rv-root" + (g.special ? " is-special" : "") +
+                           (!q && g.id === rvSel ? " on" : "") +
+                           (q && !hits.get(g.id).length ? " dim" : ""));
     b.type = "button";
-    b.className = "re-swatch" + (c === color ? " on" : "");
-    b.style.background = c;
-    b.title = c;
-    b.addEventListener("click", () => {
-      color = c;
-      $$(".re-swatch", sw).forEach(x => x.classList.toggle("on", x === b));
+    if (g.color) b.style.setProperty("--root", g.color);
+    b.title = g.folder || g.note || "";
+    const name = el("span", "rv-root-name", g.name); name.dir = "auto";
+    const count = el("span", "rv-root-count", String(q ? hits.get(g.id).length : g.rules.length));
+    b.append(el("span", "rv-swatch"), name, count);
+    b.addEventListener("click", () => { $("#rules-search").value = ""; rvSelect(g.id); });
+    rail.appendChild(b);
+  }
+
+  // right: the selected root's rules, or search results across all roots
+  const pane = $("#rv-pane");
+  pane.innerHTML = "";
+  $("#rules-empty").hidden = groups.length > 0;
+  if (q) {
+    let total = 0;
+    for (const g of groups) {
+      const rs = hits.get(g.id);
+      if (!rs.length) continue;
+      total += rs.length;
+      const h = el("div", "rv-result-head");
+      h.append(el("span", "rv-swatch"), bdiOf(g.name));
+      if (g.color) h.style.setProperty("--root", g.color);
+      pane.appendChild(h);
+      const grid = el("div", "rv-cards");
+      rs.forEach(r => grid.appendChild(ruleCard(r, g)));
+      pane.appendChild(grid);
+    }
+    if (!total) pane.appendChild(el("div", "rx-empty", "No rule matches."));
+    return;
+  }
+  const g = groups.find(x => x.id === rvSel);
+  if (!g) return;
+  const head = el("header", "rv-pane-head");
+  if (g.color) head.style.setProperty("--root", g.color);
+  const titles = el("div", "rv-pane-titles");
+  const t = el("div", "rv-pane-title"); t.append(el("span", "rv-swatch"), bdiOf(g.name));
+  const sub = el("div", "rv-pane-sub", g.folder || g.note || ""); sub.dir = "auto";
+  titles.append(t, sub);
+  head.appendChild(titles);
+  if (!g.special) {
+    const add = el("button", "rv-btn primary", "＋ New rule"); add.type = "button";
+    add.addEventListener("click", () => rvRuleDrawer(null, g));
+    const more = el("button", "rv-btn icon", "⋯"); more.type = "button"; more.title = "Root options";
+    more.addEventListener("click", e => rvRootMenu(e.currentTarget, g));
+    head.append(add, more);
+  }
+  pane.appendChild(head);
+  if (!g.rules.length) {
+    pane.appendChild(el("div", "rx-empty", "No rules in this root yet — ＋ New rule, or file a fallback here."));
+    return;
+  }
+  const grid = el("div", "rv-cards");
+  g.rules.forEach(r => grid.appendChild(ruleCard(r, null)));
+  pane.appendChild(grid);
+}
+$("#rules-search").addEventListener("input", rvRender);
+
+// "fixed text" / template / "from subject /regex/" / app suggestion
+function specView(sp) {
+  const box = el("span", "rv-spec");
+  if (!sp) { box.appendChild(el("span", "rv-muted", "app suggestion")); return box; }
+  if (sp.mode === "fixed") { box.appendChild(bdiOf(sp.value, "rv-val")); return box; }
+  if (sp.mode === "template") {
+    box.append(el("span", "rv-kind", "template"), bdiOf(sp.template, "rv-code"));
+    return box;
+  }
+  const where = { subject: "subject", body: "body", sender_name: "sender name" }[sp.source] || sp.source;
+  box.append(el("span", "rv-kind", `from ${where}`), bdiOf(sp.regex, "rv-code"));
+  if (sp.fallback) { box.append(el("span", "rv-muted", " else "), bdiOf(sp.fallback, "rv-val")); }
+  return box;
+}
+
+// one alternative as a sentence: "sender has X and subject has Y, not Z …"
+function altView(m) {
+  const li = el("li", "rv-alt");
+  const parts = [["sender has", "sender_contains"], ["subject has", "subject_contains"],
+                 ["subject doesn't have", "exclude_subject_contains"],
+                 ["body has", "body_contains"], ["body doesn't have", "exclude_body_contains"]];
+  let first = true;
+  const joiner = () => { if (!first) li.appendChild(el("span", "rv-and", " and ")); first = false; };
+  for (const [label, key] of parts) {
+    const vals = asList(m[key]);
+    if (!vals.length) continue;
+    joiner();
+    li.appendChild(el("span", "rv-cond", label + " "));
+    vals.forEach((v, i) => {
+      if (i) li.appendChild(el("span", "rv-and", " + "));
+      li.appendChild(bdiOf(v, "rv-val"));
     });
+  }
+  if (ATTACH_TEXT[m.attachments]) { joiner(); li.appendChild(el("span", "rv-cond", ATTACH_TEXT[m.attachments])); }
+  if (first) li.appendChild(el("span", "rv-muted", "(empty alternative)"));
+  return li;
+}
+
+function ruleCard(rule, group) {
+  const card = el("article", "rv-card" + (rule.exclude ? " is-exclude" : ""));
+  const head = el("header", "rv-card-head");
+  const name = el("span", "rv-card-name", rule.name); name.dir = "auto";
+  head.appendChild(name);
+  if (group) { const tag = el("span", "rv-card-root"); tag.appendChild(bdiOf(group.name)); head.appendChild(tag); }
+  const edit = el("button", "rv-btn", "Edit"); edit.type = "button";
+  edit.addEventListener("click", () => rvRuleDrawer(rule, null));
+  const more = el("button", "rv-btn icon", "⋯"); more.type = "button"; more.title = "Move, merge, delete";
+  more.addEventListener("click", e => rvRuleMenu(e.currentTarget, rule));
+  head.append(edit, more);
+  card.appendChild(head);
+
+  const specs = el("div", "rv-specs");
+  if (rule.exclude) specs.appendChild(el("span", "rv-muted", "Skipped — not a receipt"));
+  else for (const [label, key] of [["Seller", "seller"], ["Product", "product"]]) {
+    const row = el("div", "rv-spec-row");
+    row.append(el("span", "rv-label", label), specView(rule[key]));
+    specs.appendChild(row);
+  }
+  card.appendChild(specs);
+
+  const alts = rule.match || [];
+  card.appendChild(el("div", "rv-alts-title",
+    alts.length > 1 ? "Matches when any of:" : alts.length ? "Matches when:" : "No match conditions yet"));
+  const ul = el("ul", "rv-alts");
+  alts.forEach(m => ul.appendChild(altView(m)));
+  card.appendChild(ul);
+  card.addEventListener("dblclick", () => rvRuleDrawer(rule, null));
+  return card;
+}
+
+// ---- popover menu ----------------------------------------------------------
+function rvMenu(anchor, sections) {
+  const menu = $("#rv-menu");
+  menu.innerHTML = "";
+  for (const sec of sections) {
+    if (!sec.items.length) continue;
+    if (sec.title) menu.appendChild(el("div", "rv-menu-title", sec.title));
+    for (const it of sec.items) {
+      const b = el("button", "rv-menu-item" + (it.danger ? " danger" : ""));
+      b.type = "button";
+      b.appendChild(bdiOf(it.label));
+      b.addEventListener("click", () => { rvMenuClose(); it.run(); });
+      menu.appendChild(b);
+    }
+  }
+  menu.hidden = false;
+  const v = $("#view-rules").getBoundingClientRect(), a = anchor.getBoundingClientRect();
+  const m = menu.getBoundingClientRect();
+  menu.style.top = Math.min(a.bottom - v.top + 4, v.height - m.height - 8) + "px";
+  menu.style.left = Math.max(8, Math.min(a.right - v.left - m.width, v.width - m.width - 8)) + "px";
+}
+function rvMenuClose() { $("#rv-menu").hidden = true; }
+document.addEventListener("pointerdown", e => {
+  const menu = $("#rv-menu");
+  if (!menu.hidden && !menu.contains(e.target) && !e.target.closest(".rv-btn.icon")) rvMenuClose();
+});
+
+function rvRuleMenu(anchor, rule) {
+  const siblings = RV.rules.filter(r => r.id !== rule.id && !!r.exclude === !!rule.exclude &&
+                                        (rule.exclude || r.root === rule.root));
+  rvMenu(anchor, [
+    { title: rule.exclude ? null : "Move to root", items: rule.exclude ? [] : RV.roots
+        .filter(r => r.id !== rule.root)
+        .map(r => ({ label: r.name, run: async () =>
+          rvApply(await api().rule_update(rule.id, { root: r.id }), `Moved to ${r.name}`) })) },
+    { title: "Merge into", items: siblings.map(o => ({ label: o.name, run: async () => {
+        if (!confirm(`Move the ${plural((rule.match || []).length, "alternative")} of “${rule.name}” into “${o.name}” and delete “${rule.name}”?\n\nThose emails will then be named the way “${o.name}” says.`)) return;
+        rvApply(await api().rule_merge(rule.id, o.id), `Merged into ${o.name}`);
+      } })) },
+    { items: [{ label: "Delete rule", danger: true, run: async () => {
+        if (!confirm(`Delete rule “${rule.name}”? Emails it matched will land in fallbacks again.`)) return;
+        rvApply(await api().rule_delete(rule.id), "Rule deleted");
+      } }] },
+  ]);
+}
+
+function rvRootMenu(anchor, g) {
+  const others = RV.roots.filter(r => r.id !== g.id);
+  const sections = [{ items: [{ label: "Edit root…", run: () => rvRootDrawer(g) }] }];
+  if (!g.rules.length) {
+    sections.push({ items: [{ label: "Delete root", danger: true, run: async () => {
+      if (!confirm(`Delete root “${g.name}”? (Its folder on disk is not touched.)`)) return;
+      rvApply(await api().root_delete(g.id, null), "Root deleted");
+    } }] });
+  } else {
+    sections.push({ title: `Delete root — move its ${plural(g.rules.length, "rule")} to`, items: others.map(o => ({
+      label: o.name, danger: true, run: async () => {
+        if (!confirm(`Move ${plural(g.rules.length, "rule")} to “${o.name}” and delete root “${g.name}”? (Its folder on disk is not touched.)`)) return;
+        if (rvApply(await api().root_delete(g.id, o.id), "Root deleted")) rvSelect(o.id);
+      } })) });
+  }
+  rvMenu(anchor, sections);
+}
+
+// ---- side panel (drawer) ---------------------------------------------------
+let rvDrawerSave = null;
+function rvDrawerOpen(title, body, onSave) {
+  $(".rv-drawer-title").textContent = title;
+  const host = $(".rv-drawer-body");
+  host.innerHTML = "";
+  host.appendChild(body);
+  host.scrollTop = 0;
+  rvDrawerSave = onSave;
+  $("#rv-backdrop").hidden = false;
+  $("#rv-drawer").hidden = false;
+  requestAnimationFrame(() => { $("#rv-drawer").classList.add("open"); $("#rv-backdrop").classList.add("open"); });
+}
+function rvDrawerClose() {
+  $("#rv-drawer").classList.remove("open");
+  $("#rv-backdrop").classList.remove("open");
+  rvDrawerSave = null;
+  setTimeout(() => {
+    if (!$("#rv-drawer").classList.contains("open")) { $("#rv-drawer").hidden = true; $("#rv-backdrop").hidden = true; }
+  }, 220);
+}
+$("#rv-backdrop").addEventListener("click", rvDrawerClose);
+$(".rv-drawer-x").addEventListener("click", rvDrawerClose);
+$(".rv-cancel").addEventListener("click", rvDrawerClose);
+$(".rv-save").addEventListener("click", async () => {
+  if (!rvDrawerSave) return;
+  const btn = $(".rv-save");
+  btn.disabled = true;
+  try { if (await rvDrawerSave()) rvDrawerClose(); }
+  finally { btn.disabled = false; }
+});
+document.addEventListener("keydown", e => {
+  if (e.key !== "Escape") return;
+  if (!$("#rv-menu").hidden) rvMenuClose();
+  else if (!$("#rv-drawer").hidden) rvDrawerClose();
+});
+
+// edit (rule) or create (rule === null, in `group`)
+function rvRuleDrawer(rule, group) {
+  const body = $("#tpl-rule-editor").content.cloneNode(true).querySelector(".rule-editor");
+  const nameEl = $(".re-rule-name", body);
+  nameEl.value = rule ? rule.name : "";
+  const exclude = rule && rule.exclude;
+  let seller = null, product = null;
+  if (exclude) $(".cat-fields", body).hidden = true;
+  else {
+    seller = makeNameField($(".fd-seller .nf-slot", body), { spec: rule ? (rule.seller ?? null) : undefined });
+    product = makeNameField($(".fd-product .nf-slot", body), { spec: rule ? (rule.product ?? null) : undefined });
+  }
+  // alternatives are staged here and saved together with everything else
+  const alts = (rule ? rule.match || [] : []).map(m => ({ ...m }));
+  const list = $(".cat-matches", body);
+  const renderAlts = () => {
+    list.innerHTML = "";
+    if (!alts.length) list.appendChild(el("div", "rv-muted", "No alternatives yet — add one below."));
+    alts.forEach((m, i) => {
+      const row = el("div", "rv-alt-row");
+      const ul = el("ul", "rv-alts"); ul.appendChild(altView(m));
+      const del = el("button", "cat-match-del", "✕"); del.type = "button"; del.title = "Remove this alternative";
+      del.addEventListener("click", () => { alts.splice(i, 1); renderAlts(); });
+      row.append(ul, del);
+      list.appendChild(row);
+    });
+  };
+  renderAlts();
+  let widget = makeMatchRule($(".cat-add-match .mr-slot", body), {});
+  $(".cat-add-match-btn", body).addEventListener("click", () => {
+    const m = widget.value();
+    if (!hasAnchor(m)) { toast("An alternative needs a sender or subject condition", true); return; }
+    alts.push(m);
+    renderAlts();
+    widget = makeMatchRule($(".cat-add-match .mr-slot", body), {});
+  });
+
+  const where = rule ? (RV.roots.find(r => r.id === rule.root) || {}).name : group && group.name;
+  rvDrawerOpen(rule ? `Edit rule${where ? " · " + where : ""}` : `New rule in ${where}`, body, async () => {
+    const name = nameEl.value.trim();
+    if (!name) { toast("Name the rule first", true); return false; }
+    const patch = { name, match: alts };
+    if (!exclude) { patch.seller = seller.spec(); patch.product = product.spec(); }
+    const res = rule ? await api().rule_update(rule.id, patch)
+                     : await api().rule_add(name, { root: group.id, ...patch });
+    return rvApply(res, rule ? "Rule saved" : `Added ${name}`);
+  });
+  if (!rule) nameEl.focus();
+}
+
+// edit (root) or create (root === null)
+async function rvRootDrawer(root) {
+  const body = $("#tpl-root-editor").content.cloneNode(true).querySelector(".root-editor");
+  const nameEl = $(".re-name", body);
+  nameEl.value = root ? root.name : "";
+  let folder = null, color = root ? root.color : null;
+  rvDrawerOpen(root ? "Edit root" : "New root", body, async () => {
+    const name = nameEl.value.trim(), f = folder && folder.value;
+    if (!name) { toast("Name the root first", true); return false; }
+    if (!f || f === DEST_BROWSE) { toast("Pick the root's folder first", true); return false; }
+    const res = root ? await api().root_update(root.id, { name, folder: f, color })
+                     : await api().root_add(name, f, color);
+    const ok = rvApply(res, root ? "Root saved" : `Added root ${name}`);
+    if (ok && !root) {
+      const added = res.data.roots.find(r => r.name === name && r.folder === f);
+      if (added) rvSelect(added.id);
+    }
+    return ok;
+  });
+  folder = await makeDestPicker($(".re-folder", body), root ? root.folder : "");
+  const sw = $(".re-colors", body);
+  for (const c of PASTELS) {
+    const b = el("button", "re-swatch" + (c === color ? " on" : ""));
+    b.type = "button"; b.style.background = c; b.title = c;
+    b.addEventListener("click", () => { color = c; $$(".re-swatch", sw).forEach(x => x.classList.toggle("on", x === b)); });
     sw.appendChild(b);
   }
-  $(".re-save", ed).addEventListener("click", () => {
-    const name = nameEl.value.trim(), f = folder.value;
-    if (!name) { toast("Name the root first", true); return; }
-    if (!f || f === DEST_BROWSE) { toast("Pick the root's folder first", true); return; }
-    onSave({ name, folder: f, color });
-  });
-  $(".re-cancel", ed).addEventListener("click", onCancel);
   nameEl.focus();
 }
 
-function rootGroupEl(root, rules, open) {
-  const n = $("#tpl-root-group").content.cloneNode(true);
-  const g = n.querySelector(".root-group");
-  const special = root.id === RV_EXCLUDED || root.id === RV_NOROOT;
-  g.dataset.id = root.id;
-  g.dataset.hay = [root.name, root.folder, destLabel(root.folder)].join(" ").toLowerCase();
-  if (root.color) g.style.setProperty("--root", root.color);
-  g.classList.toggle("is-special", special);
-  $(".root-name", g).textContent = root.name;
-  $(".root-folder", g).textContent = special ? "" : (destLabel(root.folder) || root.folder);
-  $(".root-folder", g).title = root.folder || "";
-  $(".root-count", g).textContent = plural(rules.length, "rule");
-  const host = $(".root-editor-host", g);
-
-  if (special) {
-    $$(".root-edit-btn, .root-add-rule, .root-del", g).forEach(b => b.remove());
-  } else {
-    $(".root-edit-btn", g).addEventListener("click", () => {
-      if (!host.hidden) { host.hidden = true; return; }
-      host.hidden = false;
-      rootEditor(host, {
-        root,
-        onSave: async patch => rulesAfterWrite(await api().root_update(root.id, patch), "Root saved"),
-        onCancel: () => { host.hidden = true; },
-      });
-    });
-    $(".root-add-rule", g).addEventListener("click", () => {
-      const box = $(".root-new-rule", g);
-      box.hidden = !box.hidden;
-      if (!box.hidden) $(".rn-name", box).focus();
-    });
-    const addRule = async () => {
-      const inp = $(".rn-name", g);
-      const name = inp.value.trim();
-      if (!name) { toast("Name the rule first", true); return; }
-      if (rulesAfterWrite(await api().rule_add(name, { root: root.id }),
-                          `Added ${name} — expand it to add its match conditions`)) inp.value = "";
-    };
-    $(".rn-add", g).addEventListener("click", addRule);
-    $(".rn-name", g).addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); addRule(); } });
-    $(".root-del", g).addEventListener("click", async () => {
-      if (!rules.length) {
-        if (!confirm(`Delete root “${root.name}”? (Its folder on disk is not touched.)`)) return;
-        rulesAfterWrite(await api().root_delete(root.id, null), "Root deleted");
-        return;
-      }
-      // rules still file here — ask where they should go
-      host.hidden = false;
-      host.innerHTML = "";
-      const row = document.createElement("div");
-      row.className = "re-delete";
-      const sel = document.createElement("select");
-      RV.roots.filter(r => r.id !== root.id).forEach(r => sel.add(new Option(r.name, r.id)));
-      const go = document.createElement("button");
-      go.type = "button"; go.textContent = "Move rules + delete root";
-      const cancel = document.createElement("button");
-      cancel.type = "button"; cancel.textContent = "Cancel";
-      row.append(`Move its ${plural(rules.length, "rule")} to `, sel, go, cancel);
-      host.appendChild(row);
-      if (!sel.options.length) { go.disabled = true; sel.disabled = true; }
-      go.addEventListener("click", async () =>
-        rulesAfterWrite(await api().root_delete(root.id, sel.value), "Root deleted"));
-      cancel.addEventListener("click", () => { host.hidden = true; host.innerHTML = ""; });
-    });
-  }
-  const box = $(".root-rules", g);
-  for (const r of rules) box.appendChild(ruleRowEl(r, rules, open));
-  return n;
-}
-
-// "seller: <x> · product: <y> · N alternatives" — values in <bdi> so Hebrew
-// doesn't reorder the English labels around them.
-function ruleSummary(el, rule) {
-  el.textContent = "";
-  const n = (rule.match || []).length;
-  if (rule.exclude) { el.textContent = `excluded — matching mail is skipped · ${plural(n, "alternative")}`; return; }
-  [["seller: ", specSummary(rule.seller)], ["product: ", specSummary(rule.product)]]
-    .forEach(([lbl, val], i) => {
-      if (i) el.append("  ·  ");
-      el.append(lbl);
-      const b = document.createElement("bdi");
-      b.textContent = val;
-      el.appendChild(b);
-    });
-  el.append(`  ·  ${plural(n, "alternative")}`);
-  el.title = el.textContent;
-}
-
-function ruleRowEl(rule, siblings, open) {
-  const n = $("#tpl-rule").content.cloneNode(true);
-  const art = n.querySelector(".cat");
-  art.dataset.id = rule.id;
-  const matches = rule.match || [];
-  art.dataset.hay = [rule.name, specSummary(rule.seller), specSummary(rule.product),
-    ...matches.flatMap(m => Object.values(m).flatMap(asList))].join(" ").toLowerCase();
-  if (rule.exclude) art.classList.add("is-exclude");
-  const nameEl = $(".cat-name", art);
-  nameEl.value = rule.name || "";
-  ruleSummary($(".cat-summary", art), rule);
-
-  const rootSel = $(".rule-root", art);
-  if (rule.exclude) rootSel.remove();
-  else {
-    if (!RV.roots.some(r => r.id === rule.root)) rootSel.add(new Option("(no root)", ""));
-    RV.roots.forEach(r => rootSel.add(new Option(r.name, r.id)));
-    rootSel.value = RV.roots.some(r => r.id === rule.root) ? rule.root : "";
-    rootSel.addEventListener("change", async () => {
-      if (!rootSel.value) return;
-      const to = RV.roots.find(r => r.id === rootSel.value);
-      rulesAfterWrite(await api().rule_update(rule.id, { root: rootSel.value }), `Moved to ${to.name}`);
-    });
-  }
-
-  const merge = $(".cat-merge", art);
-  merge.innerHTML = `<option value="">merge into…</option>`;
-  siblings.filter(o => o.id !== rule.id).forEach(o => merge.add(new Option(o.name, o.id)));
-  merge.hidden = siblings.length < 2;
-  merge.addEventListener("change", async () => {
-    if (!merge.value) return;
-    const into = siblings.find(o => o.id === merge.value);
-    if (!confirm(`Move all ${plural(matches.length, "alternative")} of “${rule.name}” into “${into.name}” and delete “${rule.name}”?\n\nThose emails will then be named the way “${into.name}” says.`)) {
-      merge.value = ""; return;
-    }
-    rulesAfterWrite(await api().rule_merge(rule.id, merge.value), `Merged into ${into.name}`);
-  });
-
-  // editor (built lazily on first expand)
-  const editor = $(".cat-editor", art), caret = $(".cat-expand", art);
-  let ed = null;
-  function build() {
-    if (rule.exclude) $(".cat-fields", editor).hidden = true;
-    else ed = {
-      seller: makeNameField($(".fd-seller .nf-slot", editor), { spec: rule.seller ?? null }),
-      product: makeNameField($(".fd-product .nf-slot", editor), { spec: rule.product ?? null }),
-    };
-    const box = $(".cat-matches", editor);
-    box.innerHTML = "";
-    matches.forEach((m, i) => {
-      const row = document.createElement("div");
-      row.className = "cat-match";
-      const span = document.createElement("span");
-      span.textContent = matchText(m);
-      const del = document.createElement("button");
-      del.className = "cat-match-del"; del.textContent = "✕"; del.title = "Remove this alternative";
-      del.addEventListener("click", async () =>
-        rulesAfterWrite(await api().rule_remove_match(rule.id, i), "Alternative removed"));
-      row.append(span, del);
-      box.appendChild(row);
-    });
-    const alt = makeMatchRule($(".cat-add-match .mr-slot", editor), {});
-    $(".cat-add-match-btn", editor).addEventListener("click", async () => {
-      const m = alt.value();
-      if (!hasAnchor(m)) { toast("An alternative needs a sender or subject condition", true); return; }
-      rulesAfterWrite(await api().rule_add_match(rule.id, m), "Alternative added");
-    });
-  }
-  const toggle = () => {
-    editor.hidden = !editor.hidden;
-    caret.textContent = editor.hidden ? "▸" : "▾";
-    if (!editor.hidden && !editor._built) { editor._built = true; build(); }
-  };
-  caret.addEventListener("click", toggle);
-  if (open && open.has(rule.id)) toggle();
-
-  $(".cat-save", art).addEventListener("click", async () => {
-    const patch = { name: nameEl.value.trim() };
-    if (ed) { patch.seller = ed.seller.spec(); patch.product = ed.product.spec(); }
-    rulesAfterWrite(await api().rule_update(rule.id, patch), "Saved");
-  });
-  $(".cat-del", art).addEventListener("click", async () => {
-    if (!confirm(`Delete rule “${rule.name}”? Emails it matched will land in fallbacks again.`)) return;
-    rulesAfterWrite(await api().rule_delete(rule.id), "Deleted");
-  });
-  return n;
-}
-
-$("#root-new-btn").addEventListener("click", () => {
-  const host = $("#root-new-form");
-  if (!host.hidden) { host.hidden = true; return; }
-  host.hidden = false;
-  rootEditor(host, {
-    root: null,
-    onSave: async ({ name, folder, color }) => {
-      if (rulesAfterWrite(await api().root_add(name, folder, color), `Added root ${name}`))
-        host.hidden = true;
-    },
-    onCancel: () => { host.hidden = true; },
-  });
-});
+$("#root-new-btn").addEventListener("click", () => rvRootDrawer(null));

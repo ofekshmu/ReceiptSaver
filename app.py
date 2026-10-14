@@ -278,7 +278,7 @@ class Api:
         cfg = config or {}
         return self._rules_write(lambda R, d: d["rules"].append(
             R.new_rule(name, root=cfg.get("root"), seller=cfg.get("seller"),
-                       product=cfg.get("product"), data=d)) or True)
+                       product=cfg.get("product"), match=cfg.get("match"), data=d)) or True)
 
     def rule_update(self, rule_id: str, patch: dict) -> dict:
         return self._rules_write(lambda R, d: R.update_rule(d, rule_id, patch or {}))

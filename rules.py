@@ -377,8 +377,23 @@ def find_rule(data: dict, rule_id: str) -> dict:
     return None
 
 
+def clean_matches(entries) -> list:
+    """A rule's full list of alternatives, cleaned and de-duplicated; empty
+    alternatives are dropped. ValueError if one has no sender/subject condition."""
+    out = []
+    for e in entries or []:
+        cleaned = clean_match_entry(e)
+        if not cleaned:
+            continue
+        if not has_anchor(cleaned):
+            raise ValueError("each alternative needs a sender or subject condition")
+        if cleaned not in out:
+            out.append(cleaned)
+    return out
+
+
 def new_rule(name: str, *, root: str = None, seller=None, product=None,
-             exclude: bool = False, data: dict) -> dict:
+             exclude: bool = False, match=None, data: dict) -> dict:
     if not exclude and find_root(data, root) is None:
         raise ValueError(f"no root {root!r}")
     taken = {r.get("id") for r in data.get("rules", [])}
@@ -389,7 +404,7 @@ def new_rule(name: str, *, root: str = None, seller=None, product=None,
         "seller": validate_spec(seller),
         "product": validate_spec(product),
         "exclude": bool(exclude),
-        "match": [],
+        "match": clean_matches(match),
     }
 
 
@@ -450,6 +465,8 @@ def update_rule(data: dict, rule_id: str, patch: dict) -> bool:
     for k in ("seller", "product"):
         if k in patch:
             staged[k] = validate_spec(patch[k])      # may raise; nothing applied yet
+    if "match" in patch:
+        staged["match"] = clean_matches(patch["match"])
     rule.update(staged)
     return True
 

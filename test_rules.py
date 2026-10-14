@@ -130,6 +130,27 @@ class TestRules(unittest.TestCase):
             R.new_rule("x", root="elec", product={"mode": "extract", "source": "body",
                                                    "regex": "("}, data=d)
 
+    def test_update_rule_replaces_alternatives(self):
+        d = data()
+        self.assertTrue(R.update_rule(d, "iec", {"match": [
+            {"sender_contains": ["iec.co.il", ""], "subject_contains": "חשבון"},
+            {"sender_contains": "iec.co.il", "subject_contains": "חשבון"},   # duplicate
+            {}]}))                                                           # empty -> dropped
+        self.assertEqual(R.find_rule(d, "iec")["match"],
+                         [{"sender_contains": "iec.co.il", "subject_contains": "חשבון"}])
+
+    def test_update_rule_rejects_alternative_without_anchor(self):
+        d = data()
+        before = list(R.find_rule(d, "iec")["match"])
+        with self.assertRaises(ValueError):
+            R.update_rule(d, "iec", {"name": "x", "match": [{"body_contains": "only body"}]})
+        self.assertEqual(R.find_rule(d, "iec")["match"], before)
+        self.assertEqual(R.find_rule(d, "iec")["name"], "חברת חשמל")      # nothing applied
+
+    def test_new_rule_with_alternatives(self):
+        r = R.new_rule("x", root="elec", match=[{"sender_contains": "a.co.il"}], data=data())
+        self.assertEqual(r["match"], [{"sender_contains": "a.co.il"}])
+
     def test_update_rule(self):
         d = data()
         self.assertTrue(R.update_rule(d, "iec", {"name": "IEC", "root": "main", "seller": None}))

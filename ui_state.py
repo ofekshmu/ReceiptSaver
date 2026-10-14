@@ -13,7 +13,7 @@ from pathlib import Path
 
 UI_STATE_FILE = Path(r"C:\Users\ofeks\Scripts\ReceiptSaver\ui_state.json")
 DEFAULTS = {"hidden_roots": [], "fallbacks_simple": False, "rx_sort": "date_desc",
-            "win_w": 980, "win_h": 680}
+            "win_w": 980, "win_h": 680, "rules_root": ""}
 _LOCK = threading.Lock()
 
 
