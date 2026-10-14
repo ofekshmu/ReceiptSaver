@@ -345,7 +345,15 @@
             </div>
             <div class="opt">
               <label class="opt-head"><input type="radio" name="kind" value="once"> Move this one only</label>
-              <span class="opt-desc">File just this one email using the settings below. Nothing is remembered &mdash; a similar email later will land in fallbacks again.</span>
+              <span class="opt-desc">File just this one email into a root or any other folder. Nothing is remembered &mdash; a similar email later will land in fallbacks again.</span>
+              <div class="opt-body">
+                <div class="cat-picker f-once-pick" data-value="">
+                  <input class="cat-search" type="search" dir="auto" autocomplete="off" spellcheck="false"
+                         placeholder="Search roots&hellip;" title="Filter by root name or folder">
+                  <div class="cat-grid" role="listbox" aria-label="Where to file this email"></div>
+                  <div class="cat-grid-empty" hidden>No root matches &mdash; pick another folder.</div>
+                </div>
+              </div>
               <div class="opt-slot"></div>
             </div>
             <div class="opt">
@@ -357,16 +365,6 @@
 
           <div class="fb-fields">
             <div class="fb-fields-head" hidden></div>
-            <div class="field fd-dest">
-              <label>Destination</label>
-              <div class="combo f-dest" data-value="">
-                <input class="combo-input" type="text" dir="auto" autocomplete="off" spellcheck="false"
-                       placeholder="Pick a folder or type to search&hellip;"
-                       title="The folder this receipt is filed into. Most-used folders first; Browse… opens the Windows folder picker (it can also create a new folder).">
-                <ul class="combo-list" hidden></ul>
-              </div>
-              <span class="hint">The folder the receipt is filed into.</span>
-            </div>
             <div class="field fd-seller">
               <label>Seller</label>
               <div class="nf-slot"></div>

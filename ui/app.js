@@ -848,7 +848,7 @@ const TEMP = "__temp__";    // a not-yet-saved root picked via ＋ New root
 // With `onNew`, the ＋ tile is an action: onNew() -> item | null; a returned
 // item is shown as a temporary tile (right after ＋, replacing any previous
 // one) and selected.
-function makeTileGrid(root, items, { value, onChange, newLabel, newTitle, onNew }) {
+function makeTileGrid(root, items, { value, onChange, newLabel, newTitle, newIcon, onNew }) {
   const grid = $(".cat-grid", root), search = $(".cat-search", root);
   const empty = $(".cat-grid-empty", root);
   grid.innerHTML = "";
@@ -885,7 +885,7 @@ function makeTileGrid(root, items, { value, onChange, newLabel, newTitle, onNew 
 
   tile(NEW, b => {
     b.classList.add("is-new");
-    b.append(line("ct-plus", "＋"), line("ct-name", newLabel));
+    b.append(line("ct-plus", newIcon || "＋"), line("ct-name", newLabel));
     b.title = newTitle || "";
   });
   for (const it of items) itemTile(it);
@@ -1076,6 +1076,12 @@ function updatePin(form) {
     const b = document.createElement("bdi");
     b.textContent = root ? `${root}  ›  ${rule}` : "pick a root";
     pin.appendChild(b);
+  } else if (kind === "once") {
+    const where = $(".f-once-pick .cat-tile.is-selected .ct-name", form);
+    pin.append("  ·  ");
+    const b = document.createElement("bdi");
+    b.textContent = where ? where.textContent : "pick where it goes";
+    pin.appendChild(b);
   }
 }
 
@@ -1126,7 +1132,6 @@ function applyFieldsForKind(form) {
     : "";
   head.hidden = !head.textContent;
 
-  show(".fd-dest", kind === "once");
   show(".fd-seller", kind !== "exclude");
   show(".fd-product", kind !== "exclude");
   show(".fd-match", kind === "file" || kind === "exclude");
@@ -1181,7 +1186,6 @@ async function wireForm(scope, it, s) {
     const r = form.querySelector(`input[name=kind][value="${s.kind}"]`);
     if (r) r.checked = true;
   }
-  st.dest = await makeDestPicker($(".f-dest", form), s.destination);
   const data = st.data = await loadRules();
   const selectFile = () => { $('input[name=kind][value="file"]', form).checked = true; };
   st.rootOpen = false;
@@ -1254,6 +1258,25 @@ async function wireForm(scope, it, s) {
   st.ruleVal = knownRule && rootOk ? knownRule.id : NEW;
   await onRule(st.ruleVal);
 
+  // "Move this one only": 📁 Other folder… + the roots as tiles; nothing is saved
+  const selectOnce = () => { $('input[name=kind][value="once"]', form).checked = true; };
+  makeTileGrid($(".f-once-pick", form), rootTileItems(data), {
+    value: rootOk ? startRoot : "",
+    newIcon: "📁", newLabel: "Other folder…",
+    newTitle: "Choose any folder for just this email (the folder picker can also create one)",
+    onNew: async () => {
+      let res;
+      try { res = await api().pick_folder(); } catch (_) { res = { ok: false }; }
+      if (!res || !res.ok) { if (res && res.error) toast(res.error, true); return null; }
+      if (!res.path) return null;
+      st.onceFolder = res.path;
+      const name = res.path.split(/[\\/]+/).filter(Boolean).pop() || res.path;
+      return { name, color: "#e6e8ec", sub: "", count: "this email only", title: res.path,
+               hay: `${name} ${res.path}` };
+    },
+    onChange: () => { selectOnce(); syncFieldsForKind(form); },
+  });
+
   form.querySelectorAll("input[name=kind]").forEach(r =>
     r.addEventListener("change", () => syncFieldsForKind(form)));
   syncFieldsForKind(form);
@@ -1283,11 +1306,13 @@ async function wireForm(scope, it, s) {
         }
       }
     } else if (kind === "once") {
-      decision.destination = st.dest.value;
+      const pick = $(".f-once-pick", form).dataset.value;
+      const root = data.roots.find(r => r.id === pick);
+      decision.destination = pick === TEMP ? st.onceFolder : root ? root.folder : "";
       decision.seller = { value: st.seller.value };
       decision.product = { value: st.product.value };
-      if (!decision.destination || decision.destination === DEST_BROWSE) {
-        toast("Pick a destination folder first", true); return;
+      if (!decision.destination) {
+        toast("Pick a root — or 📁 Other folder… — first", true); return;
       }
     }
     if (decision.match && !hasAnchor(decision.match)) {
