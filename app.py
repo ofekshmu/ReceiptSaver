@@ -166,7 +166,22 @@ class Api:
             return []
 
     def get_fallbacks(self) -> list:
-        return [e for e in self._load_fallbacks() if not e.get("resolved")]
+        out = []
+        for e in self._load_fallbacks():
+            if e.get("resolved"):
+                continue
+            if e.get("conflict"):              # the stored mail text stays on disk
+                e = {**e, "conflict": {k: v for k, v in e["conflict"].items() if k != "body"}}
+            out.append(e)
+        return out
+
+    def _recheck_conflicts(self) -> dict:
+        """After any rule change: file / clear fallbacks whose conflict is gone."""
+        try:
+            return fallback_ops.recheck_conflicts(fallback_log_path=self._fallback_log_path)
+        except Exception as e:
+            _log(f"conflict re-check failed: {e!r}")
+            return {"filed": 0, "cleared": 0, "still": 0, "error": str(e)}
 
     def _fallback_by_id(self, message_id: str):
         for e in self._load_fallbacks():
@@ -200,10 +215,13 @@ class Api:
         if not entry:
             return {"ok": False, "error": "entry not found"}
         try:
-            return fallback_ops.apply_decision(entry, decision,
-                                               fallback_log_path=self._fallback_log_path)
+            res = fallback_ops.apply_decision(entry, decision,
+                                              fallback_log_path=self._fallback_log_path)
         except Exception as e:
             return {"ok": False, "error": str(e)}
+        if res.get("ok") and decision.get("kind") in ("rule", "new_rule", "exclude"):
+            res["conflicts"] = self._recheck_conflicts()       # the rules just changed
+        return res
 
     def handoff(self, message_ids: list) -> dict:
         entries = [e for e in self._load_fallbacks()
@@ -246,17 +264,18 @@ class Api:
 
     # -- rules + roots (rules.json) ----------------------------------------
     def _rules_write(self, mutate) -> dict:
-        """load -> mutate(R, data) -> save -> {ok, data}; mutate returning False
-        means "not found / no change"; a ValueError becomes {ok: False, error}."""
+        """load -> mutate(R, data) -> save -> {ok, data, conflicts}; mutate
+        returning False means "not found / no change"; a ValueError becomes
+        {ok: False, error}. Every successful change re-checks rule conflicts."""
         import rules as R
         try:
             data = R.load()
             if mutate(R, data) is False:
                 return {"ok": False, "error": "no change / not found"}
             R.save(data)
-            return {"ok": True, "data": data}
         except Exception as e:
             return {"ok": False, "error": str(e)}
+        return {"ok": True, "data": data, "conflicts": self._recheck_conflicts()}
 
     def list_rules(self) -> dict:
         """{roots, rules, counts} — counts = rules per root id."""

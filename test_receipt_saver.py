@@ -111,6 +111,48 @@ class TestRuleRouting(unittest.TestCase):
         self.assertEqual(Path(rec["folder_path"]).parent, self.dest)
         self.assertEqual(rec["rule_source"], "custom")
 
+    def test_saved_record_names_the_rule_and_root(self):
+        res = receipt_saver.process_message(self._msg("bill@iectest.co.il", "חשבון 5"),
+                                            {"label": "ofek", "email": "o@x"})
+        rec = res["record"]
+        self.assertEqual((rec["rule_id"], rec["rule_name"], rec["root_name"]), ("elec", "חשמל", "חשמל"))
+
+    def test_two_matching_rules_is_a_conflict_sent_to_fallbacks(self):
+        import json, rules
+        data = json.loads(rules.RULES_FILE.read_text(encoding="utf-8"))
+        data["rules"].append({"id": "elec2", "name": "חשמל נכס", "root": "elec", "exclude": False,
+                              "seller": None, "product": None,
+                              "match": [{"sender_contains": "iectest.co.il", "subject_contains": "חשבון"}]})
+        rules.RULES_FILE.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        for name in ("FALLBACK_LOG_FILE", "MANUAL_DIR"):
+            self.addCleanup(setattr, receipt_saver, name, getattr(receipt_saver, name))
+        receipt_saver.FALLBACK_LOG_FILE = self.tmp / "fallback_log.json"
+        receipt_saver.MANUAL_DIR = self.tmp / "manual"
+        msg = dict(self._msg("bill@iectest.co.il", "חשבון 7"), body_text="גוף המייל")
+        res = receipt_saver.process_message(msg, {"label": "ofek", "email": "o@x"})
+        self.assertEqual(res["status"], "fallback")
+        self.assertEqual(res["record"]["conflict_rules"], ["חשמל", "חשמל נכס"])
+        entry = json.loads(receipt_saver.FALLBACK_LOG_FILE.read_text(encoding="utf-8"))[0]
+        self.assertEqual([r["id"] for r in entry["conflict"]["rules"]], ["elec", "elec2"])
+        self.assertEqual(entry["conflict"]["rules"][1]["alt"],
+                         {"sender_contains": "iectest.co.il", "subject_contains": "חשבון"})
+        self.assertEqual(entry["conflict"]["body"], "גוף המייל")
+        self.assertEqual(Path(entry["folder_path"]).parent, receipt_saver.MANUAL_DIR)
+
+    def test_rule_plus_exclude_rule_is_a_conflict_too(self):
+        import json, rules
+        data = json.loads(rules.RULES_FILE.read_text(encoding="utf-8"))
+        data["rules"][1]["match"].append({"sender_contains": "iectest.co.il"})
+        rules.RULES_FILE.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        for name in ("FALLBACK_LOG_FILE", "MANUAL_DIR"):
+            self.addCleanup(setattr, receipt_saver, name, getattr(receipt_saver, name))
+        receipt_saver.FALLBACK_LOG_FILE = self.tmp / "fallback_log.json"
+        receipt_saver.MANUAL_DIR = self.tmp / "manual"
+        res = receipt_saver.process_message(self._msg("bill@iectest.co.il", "חשבון 1"),
+                                            {"label": "ofek", "email": "o@x"})
+        self.assertEqual(res["status"], "fallback")
+        self.assertEqual(res["record"]["conflict_rules"], ["חשמל", "(excluded)"])
+
     def test_template_names_use_the_mail_date(self):
         import json, rules
         data = json.loads(rules.RULES_FILE.read_text(encoding="utf-8"))

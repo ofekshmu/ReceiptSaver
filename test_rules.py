@@ -70,6 +70,23 @@ class TestMatchRule(unittest.TestCase):
         self.assertEqual(R.find_match("x@iec.co.il", data=data())["id"], "iec")
 
 
+class TestMatchAll(unittest.TestCase):
+    def test_every_matching_rule_with_the_alternative_that_fired(self):
+        d = data()
+        d["rules"].append({"id": "iec2", "name": "IEC property", "root": "main", "exclude": False,
+                           "seller": None, "product": None,
+                           "match": [{"sender_contains": "nope.com"}, {"sender_contains": "iec.co.il"}]})
+        hits = R.match_all("bill@iec.co.il", data=d)
+        self.assertEqual([(h["rule"]["id"], h["alt"]) for h in hits], [("iec", 0), ("iec2", 1)])
+
+    def test_exclude_rules_count_too_and_no_match_is_empty(self):
+        d = data()
+        d["rules"].append({"id": "x2", "name": "x2", "root": None, "exclude": True,
+                           "seller": None, "product": None, "match": [{"sender_contains": "iec.co.il"}]})
+        self.assertEqual(len(R.match_all("bill@iec.co.il", data=d)), 2)
+        self.assertEqual(R.match_all("x@nowhere.org", data=d), [])
+
+
 class TestLoadSave(unittest.TestCase):
     def test_round_trip_and_missing_and_corrupt(self):
         with tempfile.TemporaryDirectory() as d:

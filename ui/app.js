@@ -106,6 +106,15 @@ $("#btn-rescan").addEventListener("click", async () => {
 });
 
 // ---- card rendering ----------------------------------------------------
+// "Rule: X · Root: Y" (or how else it was handled) for a History card
+function ruleLine(rec) {
+  if (rec.conflict_rules && rec.conflict_rules.length)
+    return `⚠ Rule conflict: ${rec.conflict_rules.join(" + ")}`;
+  if (rec.rule_name) return `Rule: ${rec.rule_name}${rec.root_name ? `  ·  Root: ${rec.root_name}` : ""}`;
+  return { hardcoded: "Built-in rule", icount: "Built-in: iCount",
+           japanologia: "Built-in: Japanologia" }[rec.rule_source] || "";
+}
+
 function card(rec) {
   const n = $("#tpl-card").content.cloneNode(true);
   const pill = $(".pill", n);
@@ -120,6 +129,14 @@ function card(rec) {
               || rec.resolved_by || "backfill";
     sub.textContent = (sub.textContent ? sub.textContent + " · " : "")
                     + `resolved ${String(rec.resolved_at).slice(0, 10)} by ${who}`;
+  }
+  const how = ruleLine(rec);
+  if (how) {
+    const line = document.createElement("div");
+    line.className = "card-rule" + (rec.conflict_rules ? " is-conflict" : "");
+    line.textContent = how;
+    line.dir = "auto";
+    sub.after(line);
   }
   $(".chip.account", n).textContent = rec.account || "";
   $(".date", n).textContent = (rec.date || "").replace(/_/g, "-");
@@ -369,7 +386,9 @@ function fallbackClaudeButton(it) {
 function fbHeader(scope, it) {
   $(".card-title", scope).textContent = it.subject || "(no subject)";
   $(".card-sub", scope).textContent =
+    (it.conflict ? "⚠ Rule conflict · " : "") +
     `${it.sender} · ${it.account} · ${(it.date || "").replace(/_/g, "-")}`;
+  if (it.conflict) scope.querySelector(".card").classList.add("is-conflict");
   const of = $(".open-folder", scope);
   of.addEventListener("click", e => {
     e.preventDefault(); api().open_folder(it.folder_path);
@@ -1065,6 +1084,11 @@ function updatePin(form) {
   if (!pin) return;
   const opt = $(".opt.is-selected .opt-head", form);
   pin.textContent = "";
+  if (form._fb && form._fb.conflict) {
+    pin.hidden = false;
+    pin.textContent = `⚠ Rule conflict — ${form._fb.conflict.rules.length} rules match this email`;
+    return;
+  }
   pin.hidden = !opt;
   if (!opt) return;
   pin.append("◉ " + opt.textContent.trim());
@@ -1279,6 +1303,7 @@ async function wireForm(scope, it, s) {
 
   form.querySelectorAll("input[name=kind]").forEach(r =>
     r.addEventListener("change", () => syncFieldsForKind(form)));
+  if (it.conflict) showConflict(form, it.conflict);
   syncFieldsForKind(form);
 
   form.addEventListener("submit", async e => {
@@ -1328,6 +1353,7 @@ async function wireForm(scope, it, s) {
       form.closest(".card").remove();
       toast(kind === "skip" ? "Removed from the list" : `Resolved: ${st.seller.value || it.subject}`);
       if (res.warning) toast(res.warning, true);   // e.g. the old folder couldn't be removed
+      conflictToast(res.conflicts);
       if (kind !== "skip" && kind !== "once") rulesChanged();
       loadFallbacks();
       refreshHistory();
@@ -1335,6 +1361,80 @@ async function wireForm(scope, it, s) {
       toast((res && res.error) || "Failed to apply", true);
     }
   });
+}
+
+// A conflicted email: explain which rules matched and why, offer to edit them,
+// and allow only Skip — it's filed automatically once just one rule matches.
+function showConflict(form, conflict) {
+  form._fb.conflict = conflict;
+  const box = document.createElement("div");
+  box.className = "fb-conflict";
+  const n = conflict.rules.length;
+  const title = document.createElement("div");
+  title.className = "fbc-title";
+  title.textContent = `⚠ ${n} rules match this email — so it wasn't filed.`;
+  box.appendChild(title);
+  const ul = document.createElement("ul");
+  ul.className = "fbc-rules";
+  for (const r of conflict.rules) {
+    const li = document.createElement("li");
+    const name = document.createElement("b");
+    name.textContent = r.name;
+    name.dir = "auto";
+    li.appendChild(name);
+    if (r.exclude) li.append(" (exclude rule)");
+    li.append(" — because ");
+    const why = altView(r.alt || {});
+    why.className = "fbc-why";
+    li.append(...why.childNodes);
+    ul.appendChild(li);
+  }
+  box.appendChild(ul);
+  const help = document.createElement("div");
+  help.className = "fbc-help";
+  help.textContent = "Change one of them so only one matches — e.g. add a subject condition or "
+    + "“subject must NOT contain” to one rule, or merge them. As soon as only one rule matches, "
+    + "this email is filed automatically.";
+  box.appendChild(help);
+  const actions = document.createElement("div");
+  actions.className = "fbc-actions";
+  for (const r of conflict.rules) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "rv-btn";
+    b.textContent = `Edit ${r.name}`;
+    b.addEventListener("click", () => openRuleInRules(r.id));
+    actions.appendChild(b);
+  }
+  box.appendChild(actions);
+  form.prepend(box);
+  // only Skip is allowed while the conflict lasts
+  $$(".opt", form).forEach(o => { o.hidden = !$('input[name=kind][value="skip"]', o); });
+  $('input[name=kind][value="skip"]', form).checked = true;
+  $(".fb-kinds legend", form).textContent = "Or dismiss it for now";
+}
+
+// Jump to the Rules tab and open one rule in the side panel.
+async function openRuleInRules(ruleId) {
+  $$(".tab").forEach(x => x.classList.toggle("active", x.dataset.view === "rules"));
+  $$(".view").forEach(x => x.classList.toggle("active", x.id === "view-rules"));
+  await rulesLoad();
+  const rule = RV.rules.find(r => r.id === ruleId);
+  if (!rule) { toast("That rule no longer exists — the conflict may already be gone", true); return; }
+  rvSelect(rule.exclude ? RV_EXCLUDED : RV.roots.some(r => r.id === rule.root) ? rule.root : RV_NOROOT);
+  rvRuleDrawer(rule, null);
+}
+
+// After a rule change the app re-checks conflicted fallbacks.
+function conflictToast(c) {
+  if (!c) return;
+  const done = (c.filed || 0) + (c.cleared || 0);
+  if (!done) return;
+  const parts = [];
+  if (c.filed) parts.push(`${c.filed} filed`);
+  if (c.cleared) parts.push(`${c.cleared} back to normal fallbacks`);
+  toast(`${plural(done, "rule conflict")} resolved — ${parts.join(", ")}`);
+  refreshBadge();
 }
 
 async function fallbackCard(it) {
@@ -1883,6 +1983,7 @@ async function rulesLoad() {
 function rvApply(res, okMsg) {
   toast(res.ok ? okMsg : (res.error || "Failed"), !res.ok);
   if (!res.ok) return false;
+  conflictToast(res.conflicts);
   RV = { ...res.data, counts: countsOf(res.data) };
   rulesChanged();
   loadDests().then(rvRender);

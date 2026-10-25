@@ -266,6 +266,90 @@ class TestApplyDecision(_Base):
         self.assertEqual(self._rows()[0]["resolution"], "dismissed")
 
 
+class TestConflicts(_Base):
+    """A fallback that matched 2+ rules waits until the rules are fixed."""
+
+    def setUp(self):
+        super().setUp()
+        rows = json.loads(self.flog.read_text(encoding="utf-8"))
+        rows[0]["sender"] = "bill@iec.co.il"
+        rows[0]["subject"] = "חשבון חשמל"
+        rows[0]["conflict"] = {"rules": [{"id": "iec", "name": "חשמל", "exclude": False,
+                                          "alt": {"sender_contains": "iec.co.il"}},
+                                         {"id": "iec2", "name": "חשמל 2", "exclude": False,
+                                          "alt": {"sender_contains": "iec.co.il"}}],
+                               "body": "מספר חוזה 555"}
+        self.flog.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+        d = self._data()
+        d["rules"].append({"id": "iec2", "name": "חשמל 2", "root": "main", "exclude": False,
+                           "seller": FIXED("IEC"), "product": FIXED("חשבון"),
+                           "match": [{"sender_contains": "iec.co.il", "body_contains": "חוזה"}]})
+        self.rules.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+
+    def recheck(self):
+        return fallback_ops.recheck_conflicts(**self.paths)
+
+    def _set_rule(self, rid, **patch):
+        d = self._data()
+        next(r for r in d["rules"] if r["id"] == rid).update(patch)
+        self.rules.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+
+    def test_still_conflicting_stays_and_explanation_refreshes(self):
+        self._set_rule("iec2", name="חשמל — נכס")
+        res = self.recheck()
+        self.assertEqual((res["filed"], res["cleared"], res["still"]), (0, 0, 1))
+        e = self._entry()
+        self.assertFalse(e["resolved"])
+        self.assertEqual([r["name"] for r in e["conflict"]["rules"]], ["חשמל", "חשמל — נכס"])
+        self.assertEqual(e["conflict"]["rules"][1]["alt"],
+                         {"sender_contains": "iec.co.il", "body_contains": "חוזה"})   # body kept for the check
+        self.assertTrue(self.src.exists())
+
+    def test_one_rule_left_files_it_by_that_rule(self):
+        self._set_rule("iec2", match=[{"sender_contains": "iec.co.il", "body_contains": "לא קיים"}])
+        res = self.recheck()
+        self.assertEqual((res["filed"], res["still"]), (1, 0))
+        e = self._entry()
+        self.assertTrue(e["resolved"])
+        self.assertEqual(e["resolved_by"], "rules")
+        dst = self.elec / "2026_08_25 - אלקטרה - חשבונית חשמל - ofek"
+        self.assertTrue((dst / "email.pdf").exists())
+        self.assertFalse(self.src.exists())
+        row = self._rows()[0]
+        self.assertEqual((row["resolution"], row["rule_name"]), ("rule", "חשמל"))
+
+    def test_only_an_exclude_rule_left_excludes_it(self):
+        d = self._data()
+        for r in d["rules"]:
+            if r["id"] in ("iec", "iec2"):
+                r["match"] = [{"sender_contains": "nobody.example"}]
+        d["rules"].append({"id": "excluded", "name": "(excluded)", "root": None, "exclude": True,
+                           "seller": None, "product": None, "match": [{"sender_contains": "iec.co.il"}]})
+        self.rules.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+        res = self.recheck()
+        self.assertEqual(res["filed"], 1)
+        self.assertTrue(self._entry()["resolved"])
+        self.assertFalse(self.src.exists())
+        self.assertEqual(self._rows()[0]["resolution"], "exclude")
+
+    def test_no_rule_left_becomes_an_ordinary_fallback(self):
+        for rid in ("iec", "iec2"):
+            self._set_rule(rid, match=[{"sender_contains": "nobody.example"}])
+        res = self.recheck()
+        self.assertEqual(res["cleared"], 1)
+        e = self._entry()
+        self.assertFalse(e["resolved"])
+        self.assertNotIn("conflict", e)
+        self.assertTrue(self.src.exists())
+
+    def test_filing_a_conflicted_email_is_refused_but_skip_works(self):
+        res = self.apply({"kind": "once", "seller": {"value": "a"}, "product": {"value": "b"}})
+        self.assertFalse(res["ok"])
+        self.assertIn("rules", res["error"])
+        self.assertTrue(self.src.exists())
+        self.assertTrue(self.apply({"kind": "skip"})["ok"])
+
+
 class TestApplyDecisionCreatesHistoryRow(_Base):
     """A fallback with no pre-existing history row must still land in History."""
     history_exists = False

@@ -284,6 +284,23 @@ class TestRulesApi(unittest.TestCase):
     def _read(self):
         return json.loads(self.f.read_text(encoding="utf-8"))
 
+    def test_rule_change_rechecks_conflicts_and_get_fallbacks_hides_the_body(self):
+        import fallback_ops
+        rows = json.loads(self.flog.read_text(encoding="utf-8"))
+        rows[0]["conflict"] = {"rules": [{"id": "elec", "name": "חשמל", "exclude": False, "alt": {}}],
+                               "body": "secret body text"}
+        self.flog.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+        api = self._api()
+        listed = api.get_fallbacks()[0]
+        self.assertNotIn("body", listed["conflict"])
+        self.assertEqual(listed["conflict"]["rules"][0]["name"], "חשמל")
+        with mock.patch.object(fallback_ops, "recheck_conflicts",
+                               return_value={"filed": 1, "cleared": 0, "still": 0}) as rc:
+            res = api.rule_update("elec", {"name": "חשמל ראשי"})
+        self.assertTrue(res["ok"])
+        self.assertEqual(res["conflicts"], {"filed": 1, "cleared": 0, "still": 0})
+        rc.assert_called_once()
+
     def test_list_includes_counts(self):
         out = self._api().list_rules()
         self.assertEqual([r["id"] for r in out["rules"]], ["elec", "gas", "excluded"])

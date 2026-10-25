@@ -202,6 +202,83 @@ def _mark_resolved(fallback_log_path: Path, message_id: str, new_path: str,
     _atomic_write_json(fallback_log_path, rows)
 
 
+def recheck_conflicts(*, fallback_log_path: Path = None, cleanup_log_path: Path = None,
+                      history_path: Path = None, rules_path: Path = None,
+                      receipts_dir: Path = None) -> dict:
+    """Re-evaluate every fallback waiting on a rule conflict against the current
+    rules (run after any rule change):
+      exactly one rule -> filed by it (or excluded, for an exclude rule)
+      no rule          -> becomes an ordinary fallback
+      2+ rules         -> keeps waiting; the explanation is refreshed
+    Returns {"filed": n, "cleared": n, "still": n}."""
+    import datetime as _dt
+    fallback_log_path = Path(fallback_log_path or FALLBACK_LOG_FILE)
+    cleanup_log_path = cleanup_log_path or CLEANUP_LOG_FILE
+    out = {"filed": 0, "cleared": 0, "still": 0}
+    try:
+        rows = json.loads(fallback_log_path.read_text(encoding="utf-8"))
+    except Exception:
+        return out
+    if not any(r.get("conflict") and not r.get("resolved") for r in rows):
+        return out
+    data = _rules.load(rules_path)
+    now = _dt.datetime.now().isoformat(timespec="seconds")
+    changed = False
+    for e in rows:
+        c = e.get("conflict")
+        if e.get("resolved") or not c:
+            continue
+        sender, subject, body = e.get("sender", ""), e.get("subject", ""), c.get("body", "")
+        hits = _rules.match_all(sender, subject, body, data=data,
+                                attachment_count=e.get("attachment_count"))
+        if len(hits) > 1:
+            info = _rules.conflict_info(hits)
+            if info != c.get("rules"):
+                c["rules"], changed = info, True
+            out["still"] += 1
+            continue
+        changed = True
+        if not hits:
+            e.pop("conflict", None)
+            out["cleared"] += 1
+            continue
+        rule = hits[0]["rule"]
+        root = _rules.find_root(data, rule.get("root")) or {}
+        src = Path(e["folder_path"])
+        rec_id = f'{e["account"]}:{e["message_id"]}'
+        seed = {"id": rec_id, "account": e.get("account"), "account_email": e.get("account_email", ""),
+                "date": e.get("date"), "sender": sender, "subject": subject,
+                "action": "RESOLVED", "resolved_at": now, "resolved_by": "rules",
+                "rule_id": rule.get("id"), "rule_name": rule.get("name"), "root_name": root.get("name")}
+        if rule.get("exclude"):
+            if src.exists():
+                _remove_tree(src)
+            _append_json_list(cleanup_log_path, {
+                "action": "DELETED", "folder": e.get("folder_name"),
+                "reason": f'excluded by rule “{rule.get("name")}” once a rule conflict was fixed',
+                "timestamp": _dt.datetime.now().isoformat()})
+            history.upsert(rec_id, {**seed, "resolution": "exclude",
+                                    "folder_name": e.get("folder_name"),
+                                    "folder_path": e.get("folder_path")}, path=history_path)
+        else:
+            seller, product = _rules.resolve_names(rule, sender, subject, body, e.get("date"))
+            folder = _rules.destination_of(rule, data)
+            dst = compute_destination(e, folder, seller, product)
+            moved, _problem = _move_folder(src, dst) if src.exists() else (dst, None)
+            e["folder_path"] = str(moved)
+            history.upsert(rec_id, {
+                **seed, "resolution": "rule",
+                "seller": receipt_saver.sanitize(seller), "product": receipt_saver.sanitize(product),
+                "category": receipt_saver._category_label(folder), "root_id": root.get("id"),
+                "folder_name": moved.name, "folder_path": str(moved)}, path=history_path)
+        e.update(resolved=True, resolved_at=now, resolved_by="rules")
+        c.pop("body", None)                   # the text was only kept for this check
+        out["filed"] += 1
+    if changed:
+        _atomic_write_json(fallback_log_path, rows)
+    return out
+
+
 def compute_destination(entry: dict, base: Path, seller: str, product: str) -> Path:
     name = (f'{entry["date"]} - {receipt_saver.sanitize(seller)} - '
             f'{receipt_saver.sanitize(product)} - {entry["account"]}')
@@ -263,6 +340,10 @@ def apply_decision(entry: dict, decision: dict, *,
     def _resolve(new_path: str = "") -> None:
         _mark_resolved(fallback_log_path, entry["message_id"], new_path,
                        resolved_at=resolved_at, resolved_by=resolved_by)
+
+    if entry.get("conflict") and kind != "skip":
+        return {"ok": False, "error": "This email matches several rules — change the rules so "
+                                      "only one matches (it's then filed automatically), or Skip it."}
 
     if kind == "skip":                        # dismiss: folder stays where it is
         _resolve()

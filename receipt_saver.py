@@ -239,8 +239,9 @@ def _log_saved(action: str, folder_name: str, sender: str, folder: Path, files: 
     log.info("\n".join(lines))
 
 def _make_record(msg, account, run_id, action, folder, folder_name, files,
-                 seller=None, product=None, category=None, rule_source=None):
-    return {
+                 seller=None, product=None, category=None, rule_source=None,
+                 rule=None, data=None):
+    rec = {
         "id":            f'{account["label"]}:{msg["id"]}',
         "run_id":        run_id,
         "handled_at":    datetime.datetime.now().isoformat(timespec="seconds"),
@@ -258,6 +259,11 @@ def _make_record(msg, account, run_id, action, folder, folder_name, files,
         "files":         [f.name for f in files] if files else [],
         "rule_source":   rule_source,
     }
+    if rule:                                   # History shows which rule filed it
+        root = rules.find_root(data or {}, rule.get("root")) or {}
+        rec.update(rule_id=rule.get("id"), rule_name=rule.get("name"),
+                   root_name=root.get("name"))
+    return rec
 
 
 def match_hardcoded(sender: str, subject: str):
@@ -509,17 +515,27 @@ def process_message(msg: dict, account: dict, run_id: str = "") -> dict:
         return {"status": "saved", "record": rec}
 
     # ── Step 2: rules ──────────────────────────────────────────────────
+    # Every rule is checked; exactly one match files the mail. Two or more is
+    # a rule CONFLICT: the mail goes to fallbacks (with why) and waits there
+    # until the rules are changed so only one matches.
     body   = msg["body_text"]
-    custom = rules.match_rule(sender, subject, body,
-                              attachment_count=msg.get("attachment_count"),
-                              date=date_str)
-    if custom:
-        seller, product, base_dir = custom
-        if seller == rules.EXCLUDE:
+    data   = rules.load()
+    hits   = rules.match_all(sender, subject, body, data=data,
+                             attachment_count=msg.get("attachment_count"))
+    conflict = None
+    if len(hits) > 1:
+        conflict = {"rules": rules.conflict_info(hits), "body": body or ""}
+        log.info(f"CONFLICT   {sender} — {subject[:60]} — rules: "
+                 + ", ".join(h["rule"].get("name", "?") for h in hits))
+    elif hits:
+        rule = hits[0]["rule"]
+        if rule.get("exclude"):
             log.info(f"EXCLUDED   {sender} — {subject[:60]}")
             rec = _make_record(msg, account, run_id, "EXCLUDED", None, None, [],
-                               rule_source="custom")
+                               rule_source="custom", rule=rule, data=data)
             return {"status": "excluded", "record": rec}
+        seller, product = rules.resolve_names(rule, sender, subject, body, date_str)
+        base_dir = rules.destination_of(rule, data)
         category = _category_label(base_dir)
         folder_name = f"{date_str} - {sanitize(seller)} - {sanitize(product)} - {label}"
         folder, folder_name = unique_folder(base_dir, folder_name)
@@ -531,10 +547,10 @@ def process_message(msg: dict, account: dict, run_id: str = "") -> dict:
         _log_saved("DOWNLOADED", folder_name, sender, folder, files)
         rec = _make_record(msg, account, run_id, "DOWNLOADED", folder, folder_name,
                            files, seller=sanitize(seller), product=sanitize(product),
-                           category=category, rule_source="custom")
+                           category=category, rule_source="custom", rule=rule, data=data)
         return {"status": "saved", "record": rec}
 
-    # ── Step 3: fallback ───────────────────────────────────────────────
+    # ── Step 3: fallback (no rule, or a rule conflict) ─────────────────
     sender_name   = extract_display_name(sender)
     subject_clean = sanitize(subject[:60])
     folder_name   = f"{date_str} - {sender_name} - {subject_clean} - {label}"
@@ -546,7 +562,7 @@ def process_message(msg: dict, account: dict, run_id: str = "") -> dict:
         files.append(pdf)
     _log_saved("FALLBACK", folder_name, sender, folder, files)
     create_ticktick_task(folder_name, folder, label)
-    append_fallback_log({
+    entry = {
         "message_id":    msg["id"],
         "account":       label,
         "account_email": account["email"],
@@ -557,8 +573,13 @@ def process_message(msg: dict, account: dict, run_id: str = "") -> dict:
         "folder_path":   str(folder),
         "attachment_count": msg.get("attachment_count"),
         "resolved":      False,
-    })
+    }
+    if conflict:
+        entry["conflict"] = conflict
+    append_fallback_log(entry)
     rec = _make_record(msg, account, run_id, "FALLBACK", folder, folder_name, files)
+    if conflict:
+        rec["conflict_rules"] = [r["name"] for r in conflict["rules"]]
     return {"status": "fallback", "record": rec}
 
 # ══════════════════════════════════════════════════════════════════════════

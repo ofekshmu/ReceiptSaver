@@ -543,6 +543,30 @@ def find_match(sender: str, subject: str = "", body: str = "",
     return None
 
 
+def match_all(sender: str, subject: str = "", body: str = "",
+              data: dict = None, attachment_count: int = None) -> list:
+    """Every rule with a matching alternative (exclude rules included), in
+    file order: [{"rule": rule, "alt": index of the first alternative that
+    matched}]. Two or more hits = a rule conflict."""
+    data = data if data is not None else load()
+    body_norm = normalize_body(body)
+    out = []
+    for rule in data.get("rules", []):
+        for i, m in enumerate(rule.get("match", [])):
+            if _entry_matches(m, sender, subject, body_norm, attachment_count):
+                out.append({"rule": rule, "alt": i})
+                break
+    return out
+
+
+def conflict_info(hits: list) -> list:
+    """What a fallback entry records about a conflict: which rules matched and
+    the alternative of each one that did — enough to explain it to the user."""
+    return [{"id": h["rule"].get("id"), "name": h["rule"].get("name"),
+             "exclude": bool(h["rule"].get("exclude")),
+             "alt": (h["rule"].get("match") or [{}])[h["alt"]]} for h in hits]
+
+
 def match_rule(sender: str, subject: str = "", body: str = "",
                data: dict = None, attachment_count: int = None, date: str = None):
     """`(seller, product, folder)` for the first matching rule — `folder` a
