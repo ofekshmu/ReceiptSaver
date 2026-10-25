@@ -186,6 +186,15 @@ class TestRuleRouting(unittest.TestCase):
         self.assertEqual(logged[0]["attachment_count"], 0)
 
 
+class TestHardcodedLabel(unittest.TestCase):
+    def test_names_the_built_in_rule(self):
+        self.assertEqual(receipt_saver.hardcoded_label("orders@wolt.com", "x"), "Wolt")
+        self.assertEqual(receipt_saver.hardcoded_label("a@cardcom.co.il", "x"), "Cardcom")
+        self.assertEqual(receipt_saver.hardcoded_label("a@stripe.com", "x"), "Stripe")
+        self.assertEqual(receipt_saver.hardcoded_label("a@fattal.co.il", "x"), "Fattal")
+        self.assertIsNone(receipt_saver.hardcoded_label("a@nowhere.org", "x"))
+
+
 class TestGmailAttachmentNames(unittest.TestCase):
     def test_nested_parts_and_document_count(self):
         import gmail_provider, rules
@@ -279,6 +288,7 @@ class TestProcessMessageRecord(unittest.TestCase):
         self.assertEqual(rec["seller"], "סלקום")
         self.assertEqual(rec["category"], "חשבנות/אינטרנט")
         self.assertEqual(rec["rule_source"], "hardcoded")
+        self.assertEqual(rec["rule_name"], "סלקום")        # which built-in rule
         self.assertEqual(rec["account"], "ofek")
 
     def test_fallback_returns_record_and_logs_history(self):

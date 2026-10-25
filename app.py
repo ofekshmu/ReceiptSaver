@@ -156,7 +156,24 @@ class Api:
 
     # -- history ---------------------------------------------------------
     def get_history(self, offset: int = 0, limit: int = 50) -> list:
-        return history.page(int(offset), int(limit))
+        import rules as R
+        rows = history.page(int(offset), int(limit))
+        data = None
+        for r in rows:
+            if r.get("rule_name"):
+                continue
+            # older rows didn't record which rule handled them — work it out
+            if r.get("rule_source") == "hardcoded":
+                r["rule_name"] = receipt_saver.hardcoded_label(r.get("sender"), r.get("subject"))
+            elif r.get("rule_source") == "custom":
+                data = data if data is not None else R.load()
+                hits = R.match_all(r.get("sender") or "", r.get("subject") or "", data=data)
+                if len(hits) == 1:
+                    rule = hits[0]["rule"]
+                    root = R.find_root(data, rule.get("root")) or {}
+                    r.update(rule_id=rule.get("id"), rule_name=rule.get("name"),
+                             root_name=root.get("name"), rule_inferred=True)
+        return rows
 
     # -- fallbacks -----------------------------------------------------
     def _load_fallbacks(self) -> list:

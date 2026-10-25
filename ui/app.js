@@ -106,13 +106,32 @@ $("#btn-rescan").addEventListener("click", async () => {
 });
 
 // ---- card rendering ----------------------------------------------------
-// "Rule: X · Root: Y" (or how else it was handled) for a History card
+// How a History row was handled: { text, ruleId?, title?, cls? }. Rows that
+// name one of your rules become a link that opens it in the Rules tab.
 function ruleLine(rec) {
   if (rec.conflict_rules && rec.conflict_rules.length)
-    return `⚠ Rule conflict: ${rec.conflict_rules.join(" + ")}`;
-  if (rec.rule_name) return `Rule: ${rec.rule_name}${rec.root_name ? `  ·  Root: ${rec.root_name}` : ""}`;
-  return { hardcoded: "Built-in rule", icount: "Built-in: iCount",
-           japanologia: "Built-in: Japanologia" }[rec.rule_source] || "";
+    return { text: `⚠ Rule conflict: ${rec.conflict_rules.join(" + ")}`, cls: "is-conflict" };
+  if (rec.rule_source === "hardcoded")
+    return { text: `Built-in rule: ${rec.rule_name || "?"}`, cls: "is-builtin",
+             title: "One of the rules built into the app — not editable in the Rules tab (yet)" };
+  if (rec.rule_source === "icount") return { text: "Built-in: iCount", cls: "is-builtin" };
+  if (rec.rule_source === "japanologia") return { text: "Built-in: Japanologia", cls: "is-builtin" };
+  const root = rec.root_name ? `  ·  Root: ${rec.root_name}` : "";
+  if (rec.rule_name) {
+    const lead = rec.action === "EXCLUDED" || rec.resolution === "exclude" ? "Excluded by rule" : "Rule";
+    return { text: `${lead}: ${rec.rule_name}${root}`, ruleId: rec.rule_id,
+             title: rec.rule_inferred ? "Worked out from today's rules (this row didn't record it)"
+                                      : "Open this rule in the Rules tab" };
+  }
+  switch (rec.resolution) {
+    case "once": return { text: "Moved this one only — no rule" };
+    case "exclude": return { text: "Excluded — added to the (excluded) rule", ruleId: "excluded" };
+    case "dismissed": return { text: "Skipped — left in _לטיפול ידני" };
+    case "category": return { text: `Category: ${rec.category_name || "?"} (before rules)` };
+    case "backfilled": return { text: "Resolved by hand (before History recorded how)", cls: "is-muted" };
+  }
+  if (rec.action === "EXCLUDED") return { text: "Excluded by a rule" };
+  return null;
 }
 
 function card(rec) {
@@ -132,10 +151,14 @@ function card(rec) {
   }
   const how = ruleLine(rec);
   if (how) {
-    const line = document.createElement("div");
-    line.className = "card-rule" + (rec.conflict_rules ? " is-conflict" : "");
-    line.textContent = how;
-    line.dir = "auto";
+    const line = document.createElement(how.ruleId ? "a" : "div");
+    line.className = "card-rule" + (how.cls ? " " + how.cls : "") + (how.ruleId ? " is-link" : "");
+    line.textContent = how.text;
+    if (how.title) line.title = how.title;
+    if (how.ruleId) {
+      line.href = "#";
+      line.addEventListener("click", e => { e.preventDefault(); openRuleInRules(how.ruleId); });
+    }
     sub.after(line);
   }
   $(".chip.account", n).textContent = rec.account || "";

@@ -266,6 +266,21 @@ def _make_record(msg, account, run_id, action, folder, folder_name, files,
     return rec
 
 
+# a readable name for the built-in rules whose seller is computed per mail
+_HARDCODED_NAMES = {"_cardcom_seller": "Cardcom", "_stripe_seller": "Stripe",
+                    "extract_display_name": "Fattal"}
+
+
+def hardcoded_label(sender: str, subject: str):
+    """Which built-in rule handles this mail (e.g. "Wolt"), or None."""
+    for match_fn, seller_val, _product_fn, _category in KNOWN_RULES:
+        if match_fn(sender or "", subject or ""):
+            if callable(seller_val):
+                return _HARDCODED_NAMES.get(getattr(seller_val, "__name__", ""), "built-in")
+            return seller_val
+    return None
+
+
 def match_hardcoded(sender: str, subject: str):
     for match_fn, seller_val, product_fn, category in KNOWN_RULES:
         if match_fn(sender, subject):
@@ -512,6 +527,7 @@ def process_message(msg: dict, account: dict, run_id: str = "") -> dict:
         rec = _make_record(msg, account, run_id, "DOWNLOADED", folder, folder_name,
                            files, seller=seller, product=product,
                            category=category, rule_source="hardcoded")
+        rec["rule_name"] = hardcoded_label(sender, subject)
         return {"status": "saved", "record": rec}
 
     # ── Step 2: rules ──────────────────────────────────────────────────

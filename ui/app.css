@@ -690,8 +690,12 @@ button.step-head:hover .step-toggle { text-decoration: underline; }
 .opt[hidden] { display: none; }
 
 /* ---- History: which rule filed it ---------------------------------------- */
-.card-rule { font-size: 11.5px; color: var(--accent); margin-top: 2px;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card-rule { display: block; font-size: 11.5px; color: var(--muted); margin-top: 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-decoration: none; }
+.card-rule.is-link { color: var(--accent); cursor: pointer; }
+.card-rule.is-link:hover { text-decoration: underline; }
+.card-rule.is-builtin { color: #b3a3f0; }
+.card-rule.is-muted { font-style: italic; }
 .card-rule.is-conflict { color: var(--warn); }
 
 /* ---- Rules view: roots rail + rule cards + side panel ------------------- */
