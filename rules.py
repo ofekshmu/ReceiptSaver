@@ -57,7 +57,7 @@ LIST_KEYS = ("sender_contains", "subject_contains", "exclude_subject_contains",
              "body_contains", "exclude_body_contains")
 MATCH_COND_KEYS = LIST_KEYS + ("attachments",)
 ATTACHMENT_RULES = ("none", "one", "many")
-SOURCES = ("subject", "body", "sender_name")
+SOURCES = ("subject", "body", "sender_name", "attachment_name")
 _IMAGE_EXT = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg", ".heic",
               ".heif", ".tif", ".tiff", ".ico"}
 
@@ -131,7 +131,16 @@ def normalize_body(body: str) -> str:
     return re.sub(r"[\s\xa0]+", " ", body or "")
 
 
-def _source_text(source: str, sender: str, subject: str, body: str) -> str:
+def attachment_stem(attachment: str) -> str:
+    """The mail's first attachment's file name without its extension ("" if none)."""
+    name = os.path.basename(str(attachment or "").strip())
+    return os.path.splitext(name)[0] if name else ""
+
+
+def _source_text(source: str, sender: str, subject: str, body: str,
+                 attachment: str = "") -> str:
+    if source == "attachment_name":
+        return attachment_stem(attachment)
     if source == "subject":
         return subject or ""
     if source == "body":
@@ -141,11 +150,12 @@ def _source_text(source: str, sender: str, subject: str, body: str) -> str:
     raise ValueError(f"unknown source {source!r}")
 
 
-def extract(source: str, regex: str, sender: str, subject: str, body: str):
+def extract(source: str, regex: str, sender: str, subject: str, body: str,
+            attachment: str = ""):
     """Run `regex` over the chosen part of the mail. Returns the sanitized first
     capture group (or whole match when the regex has no group), or None on a
     miss. Raises ValueError on an invalid regex or unknown source."""
-    text = _source_text(source, sender, subject, body)
+    text = _source_text(source, sender, subject, body, attachment)
     try:
         rx = re.compile(regex)
     except re.error as e:
@@ -162,7 +172,7 @@ def extract(source: str, regex: str, sender: str, subject: str, body: str):
 # Each token is replaced with a piece of the email; plain text is kept as is.
 TEMPLATE_TOKENS = ("sender_name", "sender_company", "sender_domain", "sender_address",
                    "subject", "subject_no_numbers", "subject_first_word",
-                   "subject_word", "subject_words", "year", "month")
+                   "subject_word", "subject_words", "attachment_name", "year", "month")
 _TOKEN_RE = re.compile(r"\{([a-z_]+)(?::([^{}]*))?\}")
 _ARG_TOKENS = {"subject_word": r"[1-9]\d*", "subject_words": r"[1-9]\d*-[1-9]\d*"}
 
@@ -194,7 +204,8 @@ def validate_template(template: str) -> str:
     return t
 
 
-def render_template(template: str, sender: str, subject: str, date: str = None) -> str:
+def render_template(template: str, sender: str, subject: str, date: str = None,
+                    attachment: str = "") -> str:
     """Fill a template for one mail; folder-safe; "" when nothing came out."""
     words = (subject or "").split()
     ymd = re.match(r"(\d{4})[-_](\d{2})", str(date or ""))
@@ -222,6 +233,8 @@ def render_template(template: str, sender: str, subject: str, date: str = None) 
         if name == "subject_words":
             a, b = (int(x) for x in (arg or "0-0").split("-"))
             return " ".join(words[max(a, 1) - 1:b])
+        if name == "attachment_name":
+            return attachment_stem(attachment)
         if name == "year":
             return ymd.group(1) if ymd else ""
         if name == "month":
@@ -234,21 +247,26 @@ def render_template(template: str, sender: str, subject: str, date: str = None) 
 
 
 def resolve_spec(spec, sender: str, subject: str, body: str, suggestion: str,
-                 date: str = None) -> str:
+                 date: str = None, attachment: str = "") -> str:
     """The value a spec yields for one mail; never raises, never empty."""
     if spec and spec.get("mode") == "fixed" and (spec.get("value") or "").strip():
         return spec["value"].strip()
     if spec and spec.get("mode") == "template":
-        return render_template(spec.get("template") or "", sender, subject, date) or suggestion
+        return (render_template(spec.get("template") or "", sender, subject, date, attachment)
+                or suggestion)
     if spec and spec.get("mode") == "extract":
         try:
-            hit = extract(spec.get("source"), spec.get("regex") or "", sender, subject, body)
+            hit = extract(spec.get("source"), spec.get("regex") or "", sender, subject, body,
+                          attachment)
         except ValueError:
             hit = None
         if hit:
             return hit
-        if (spec.get("fallback") or "").strip():
-            return spec["fallback"].strip()
+        fallback = (spec.get("fallback") or "").strip()
+        if fallback and _TOKEN_RE.search(fallback):      # e.g. "{sender_name}"
+            return render_template(fallback, sender, subject, date, attachment) or suggestion
+        if fallback:
+            return fallback
     return suggestion
 
 
@@ -274,18 +292,21 @@ def validate_spec(spec):
         except re.error as e:
             raise ValueError(f"invalid regex: {e}") from None
         out = {"mode": "extract", "source": source, "regex": regex}
-        if (spec.get("fallback") or "").strip():
-            out["fallback"] = spec["fallback"].strip()
+        fallback = (spec.get("fallback") or "").strip()
+        if fallback:
+            if _TOKEN_RE.search(fallback):               # the fallback may be a template
+                validate_template(fallback)
+            out["fallback"] = fallback
         return out
     raise ValueError(f"unknown mode {mode!r}")
 
 
 def resolve_names(rule: dict, sender: str, subject: str, body: str = "",
-                  date: str = None) -> tuple:
+                  date: str = None, attachment: str = "") -> tuple:
     """(seller, product) a rule yields for one mail."""
     sug_seller, sug_product = naming.suggest_names(sender, subject)
-    return (resolve_spec(rule.get("seller"), sender, subject, body, sug_seller, date),
-            resolve_spec(rule.get("product"), sender, subject, body, sug_product, date))
+    return (resolve_spec(rule.get("seller"), sender, subject, body, sug_seller, date, attachment),
+            resolve_spec(rule.get("product"), sender, subject, body, sug_product, date, attachment))
 
 
 def needs_body(rule: dict) -> bool:
@@ -568,7 +589,8 @@ def conflict_info(hits: list) -> list:
 
 
 def match_rule(sender: str, subject: str = "", body: str = "",
-               data: dict = None, attachment_count: int = None, date: str = None):
+               data: dict = None, attachment_count: int = None, date: str = None,
+               attachment: str = ""):
     """`(seller, product, folder)` for the first matching rule — `folder` a
     Path — or `(EXCLUDE, None, None)` for an exclude rule, or None."""
     data = data if data is not None else load()
@@ -577,7 +599,7 @@ def match_rule(sender: str, subject: str = "", body: str = "",
         return None
     if rule.get("exclude"):
         return EXCLUDE, None, None
-    seller, product = resolve_names(rule, sender, subject, body, date)
+    seller, product = resolve_names(rule, sender, subject, body, date, attachment)
     return seller, product, destination_of(rule, data)
 
 

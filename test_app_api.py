@@ -43,13 +43,20 @@ class TestApi(unittest.TestCase):
         page = api.get_history(0, 2)
         self.assertEqual([r["id"] for r in page], ["ofek:3", "ofek:2"])
 
-    def test_get_history_names_built_in_rules_for_old_rows(self):
+    def test_get_history_links_old_built_in_rows_to_the_converted_rule(self):
+        import rules as R, migrate_builtins
+        tmp = Path(tempfile.mkdtemp()) / "rules.json"
+        R.save(migrate_builtins.convert(R.empty(), receipts_dir=Path("C:/r")), tmp)
+        self.addCleanup(setattr, R, "RULES_FILE", R.RULES_FILE)
+        R.RULES_FILE = tmp
         rows = json.loads(history_mod.HISTORY_FILE.read_text(encoding="utf-8"))
         rows.append({"id": "ofek:w", "action": "DOWNLOADED", "rule_source": "hardcoded",
+                     "rule_name": "Wolt",          # v1.1.41-42 named it, without an id
                      "sender": "info@wolt.com", "subject": "Your order"})
         history_mod.HISTORY_FILE.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
-        page = self._api().get_history(0, 1)
-        self.assertEqual((page[0]["id"], page[0]["rule_name"]), ("ofek:w", "Wolt"))
+        top = self._api().get_history(0, 1)[0]
+        self.assertEqual((top["id"], top["rule_id"], top["rule_name"], top["root_name"],
+                          top["rule_inferred"]), ("ofek:w", "wolt", "Wolt", "Wolt", True))
 
     def test_get_history_works_out_the_rule_for_older_rule_rows(self):
         import rules as R

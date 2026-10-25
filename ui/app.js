@@ -111,9 +111,11 @@ $("#btn-rescan").addEventListener("click", async () => {
 function ruleLine(rec) {
   if (rec.conflict_rules && rec.conflict_rules.length)
     return { text: `⚠ Rule conflict: ${rec.conflict_rules.join(" + ")}`, cls: "is-conflict" };
-  if (rec.rule_source === "hardcoded")
+  // filed by a rule built into the app before v1.1.43 (now ordinary rules); linked
+  // below when today's rules work out which one, else just named
+  if (rec.rule_source === "hardcoded" && !rec.rule_id)
     return { text: `Built-in rule: ${rec.rule_name || "?"}`, cls: "is-builtin",
-             title: "One of the rules built into the app — not editable in the Rules tab (yet)" };
+             title: "One of the rules that used to be built into the app" };
   if (rec.rule_source === "icount") return { text: "Built-in: iCount", cls: "is-builtin" };
   if (rec.rule_source === "japanologia") return { text: "Built-in: Japanologia", cls: "is-builtin" };
   const root = rec.root_name ? `  ·  Root: ${rec.root_name}` : "";
@@ -568,6 +570,7 @@ const NF_TOKENS = [
   { insert: "{subject_first_word}", label: "1st word" },
   { insert: "{subject_word:2}", label: "word N" },
   { insert: "{subject_words:2-4}", label: "words A–B" },
+  { insert: "{attachment_name}", label: "attachment name" },
   { insert: "{year}", label: "year" },
   { insert: "{month}", label: "month" },
 ];
@@ -709,11 +712,15 @@ function makeNameField(slot, { spec, value, preview, previewTemplate }) {
   };
 }
 
+// what each extraction source reads, in words (rules.SOURCES)
+const SOURCE_TEXT = { subject: "subject", body: "body", sender_name: "sender name",
+                      attachment_name: "attachment name" };
+
 function specSummary(sp) {
   if (!sp) return "app suggestion";
   if (sp.mode === "fixed") return sp.value;
   if (sp.mode === "template") return sp.template;
-  const where = { subject: "subject", body: "body", sender_name: "sender name" }[sp.source] || sp.source;
+  const where = SOURCE_TEXT[sp.source] || sp.source;
   return `from ${where}`;
 }
 
@@ -2125,7 +2132,7 @@ function specView(sp) {
     box.append(el("span", "rv-kind", "template"), bdiOf(sp.template, "rv-code"));
     return box;
   }
-  const where = { subject: "subject", body: "body", sender_name: "sender name" }[sp.source] || sp.source;
+  const where = SOURCE_TEXT[sp.source] || sp.source;
   box.append(el("span", "rv-kind", `from ${where}`), bdiOf(sp.regex, "rv-code"));
   if (sp.fallback) { box.append(el("span", "rv-muted", " else "), bdiOf(sp.fallback, "rv-val")); }
   return box;

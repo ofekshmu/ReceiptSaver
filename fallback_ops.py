@@ -87,7 +87,8 @@ def suggest(entry: dict, rules_path: Path = None, receipts_dir: Path = None) -> 
     known = _sender_rule(sender, data)
     if known:
         seller, product = _rules.resolve_names(known, sender, subject,
-                                               date=entry.get("date"))
+                                               date=entry.get("date"),
+                                               attachment=entry_attachment(entry))
         destination = _rules.destination_of(known, data)
         confidence, rule_id, root_id = "high", known["id"], known.get("root")
     else:
@@ -261,7 +262,8 @@ def recheck_conflicts(*, fallback_log_path: Path = None, cleanup_log_path: Path 
                                     "folder_name": e.get("folder_name"),
                                     "folder_path": e.get("folder_path")}, path=history_path)
         else:
-            seller, product = _rules.resolve_names(rule, sender, subject, body, e.get("date"))
+            seller, product = _rules.resolve_names(rule, sender, subject, body, e.get("date"),
+                                                   entry_attachment(e))
             folder = _rules.destination_of(rule, data)
             dst = compute_destination(e, folder, seller, product)
             moved, _problem = _move_folder(src, dst) if src.exists() else (dst, None)
@@ -277,6 +279,18 @@ def recheck_conflicts(*, fallback_log_path: Path = None, cleanup_log_path: Path 
     if changed:
         _atomic_write_json(fallback_log_path, rows)
     return out
+
+
+def entry_attachment(entry: dict) -> str:
+    """The fallback mail's first attachment name: recorded by the scan since
+    v1.1.43; for older entries, the first saved file that isn't email.pdf."""
+    if entry.get("attachment_name") is not None:
+        return entry.get("attachment_name") or ""
+    try:
+        files = sorted(p.name for p in Path(entry.get("folder_path") or "").iterdir() if p.is_file())
+    except OSError:
+        return ""
+    return next((f for f in files if f.lower() != "email.pdf"), "")
 
 
 def compute_destination(entry: dict, base: Path, seller: str, product: str) -> Path:

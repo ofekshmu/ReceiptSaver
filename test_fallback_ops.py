@@ -266,6 +266,33 @@ class TestApplyDecision(_Base):
         self.assertEqual(self._rows()[0]["resolution"], "dismissed")
 
 
+class TestEntryAttachment(_Base):
+    def test_recorded_name_wins(self):
+        self.assertEqual(fallback_ops.entry_attachment({"attachment_name": "a_1.pdf"}), "a_1.pdf")
+        self.assertEqual(fallback_ops.entry_attachment({"attachment_name": ""}), "")
+
+    def test_older_entries_use_the_first_saved_file_but_email_pdf(self):
+        folder = Path(self._entry()["folder_path"])
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "email.pdf").write_text("x", encoding="utf-8")
+        (folder / "inv_9.pdf").write_text("x", encoding="utf-8")
+        self.assertEqual(fallback_ops.entry_attachment({"folder_path": str(folder)}), "inv_9.pdf")
+        self.assertEqual(fallback_ops.entry_attachment({"folder_path": str(folder / "gone")}), "")
+
+    def test_conflict_recheck_names_with_the_attachment(self):
+        rows = json.loads(self.flog.read_text(encoding="utf-8"))
+        rows[0].update(sender="bill@iec.co.il", subject="חשבון", attachment_name="2026-09_x.pdf",
+                       conflict={"rules": [], "body": ""})
+        self.flog.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+        d = self._data()
+        d["rules"][0]["product"] = {"mode": "extract", "source": "attachment_name",
+                                    "regex": r"^([^_]+)"}
+        self.rules.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+        res = fallback_ops.recheck_conflicts(**self.paths)
+        self.assertEqual(res["filed"], 1)
+        self.assertEqual(self._rows()[-1]["product"], "2026-09")
+
+
 class TestConflicts(_Base):
     """A fallback that matched 2+ rules waits until the rules are fixed."""
 

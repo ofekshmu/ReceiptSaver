@@ -10,8 +10,9 @@ Folder format: YYYY-MM-DD - Seller - Product - [account]
 
 Decision pipeline per email:
   1. Skip if in SENT folder
-  2. Check hardcoded KNOWN_RULES  → save to קבלות\
+  2. Built-ins: Japanologia lesson summaries, iCount
   3. Check rules.json             → save to the matching rule's root folder
+                                    (2+ matching rules = conflict → fallback)
   4. Fallback                     → save to קבלות\_לטיפול ידני\
                                     + log to fallback_log.json
                                     + TickTick task
@@ -184,50 +185,6 @@ def parse_lesson_folder(subject: str, email_date: str) -> str | None:
     except ValueError:
         return None
 
-def sender_contains(sender: str, *fragments: str) -> bool:
-    return any(f in sender.lower() for f in fragments)
-
-# ══════════════════════════════════════════════════════════════════════════
-# HARDCODED KNOWN RULES
-# ══════════════════════════════════════════════════════════════════════════
-
-def _wolt_product(subject, att):
-    if att:
-        return sanitize(re.split(r"_", att)[0].strip())
-    return "משלוח"
-
-def _cardcom_seller(sender, subject):
-    m = re.search(r"מ(.+?)(?:\s*[-–]\s*עבור|$)", subject)
-    return sanitize(m.group(1).strip()) if m else extract_display_name(sender)
-
-def _cardcom_product(subject, att):
-    m = re.search(r"(חשבונית[^\d]*)", subject)
-    return sanitize(m.group(1).strip()) if m else "חשבונית"
-
-def _israelpost_product(subject, att):
-    cleaned = re.sub(r"דואר ישראל[\s\-–]*", "", subject, flags=re.IGNORECASE)
-    return sanitize(re.sub(r"\s{2,}", " ", cleaned).strip(" -–")) or "הזמנה"
-
-def _stripe_seller(sender, subject):
-    m = re.search(r"receipt from (.+?)(?:\s#|\s*$)", subject, re.IGNORECASE)
-    return sanitize(m.group(1).strip()) if m else extract_display_name(sender)
-
-KNOWN_RULES = [
-    # (match_fn, seller, product_fn, category_or_None)
-    (lambda s, sub: sender_contains(s, "wolt.com"),         "Wolt",               _wolt_product,                       "Wolt"),
-    (lambda s, sub: sender_contains(s, "ksp.co.il"),        "KSP",                lambda sub, att: "חשבונית וקבלה",   None),
-    (lambda s, sub: sender_contains(s, "paneco.com"),       "פאנקו",              lambda sub, att: "הזמנה",            None),
-    (lambda s, sub: sender_contains(s, "cellcominv.co.il"), "סלקום",              lambda sub, att: "חשבונית חודשית",  "חשבנות/אינטרנט"),
-    (lambda s, sub: sender_contains(s, "yesplanet.co.il"),  "Yes Planet",         lambda sub, att: "כרטיסים",         None),
-    (lambda s, sub: sender_contains(s, "mhc.org.il"),       "מדיטק",              lambda sub, att: "הזמנה",            None),
-    (lambda s, sub: sender_contains(s, "israelpost.co.il"), "דואר ישראל",         _israelpost_product,                 None),
-    (lambda s, sub: sender_contains(s, "cardcom.co.il"),    _cardcom_seller,      _cardcom_product,                    None),
-    (lambda s, sub: sender_contains(s, "flymoney.com"),     "FlyMoney",           lambda sub, att: 'מט"ח',             None),
-    (lambda s, sub: sender_contains(s, "fattal.co.il") or "nyx" in sub.lower(),
-                                                             extract_display_name, lambda sub, att: "חשבונית",         None),
-    (lambda s, sub: sender_contains(s, "stripe.com"),       _stripe_seller,       lambda sub, att: "מנוי",             None),
-]
-
 def _log_saved(action: str, folder_name: str, sender: str, folder: Path, files: list):
     lines = [
         f"{action:<10} {folder_name}",
@@ -265,28 +222,6 @@ def _make_record(msg, account, run_id, action, folder, folder_name, files,
                    root_name=root.get("name"))
     return rec
 
-
-# a readable name for the built-in rules whose seller is computed per mail
-_HARDCODED_NAMES = {"_cardcom_seller": "Cardcom", "_stripe_seller": "Stripe",
-                    "extract_display_name": "Fattal"}
-
-
-def hardcoded_label(sender: str, subject: str):
-    """Which built-in rule handles this mail (e.g. "Wolt"), or None."""
-    for match_fn, seller_val, _product_fn, _category in KNOWN_RULES:
-        if match_fn(sender or "", subject or ""):
-            if callable(seller_val):
-                return _HARDCODED_NAMES.get(getattr(seller_val, "__name__", ""), "built-in")
-            return seller_val
-    return None
-
-
-def match_hardcoded(sender: str, subject: str):
-    for match_fn, seller_val, product_fn, category in KNOWN_RULES:
-        if match_fn(sender, subject):
-            seller = seller_val(sender, subject) if callable(seller_val) else seller_val
-            return seller, product_fn, category
-    return None
 
 # ══════════════════════════════════════════════════════════════════════════
 # ICOUNT SPECIAL HANDLING
@@ -510,27 +445,7 @@ def process_message(msg: dict, account: dict, run_id: str = "") -> dict:
                            category=category, rule_source="icount")
         return {"status": "saved", "record": rec}
 
-    # ── Step 1: hardcoded rules ─────────────────────────────────────────
-    rule = match_hardcoded(sender, subject)
-    if rule:
-        seller, product_fn, category = rule
-        product     = sanitize(product_fn(subject, first_att))
-        base_dir    = RECEIPTS_DIR / category if category else RECEIPTS_DIR
-        folder_name = f"{date_str} - {seller} - {product} - {label}"
-        folder, folder_name = unique_folder(base_dir, folder_name)
-        folder.mkdir(parents=True, exist_ok=True)
-        files = save_attachments(msg["attachments"], folder)
-        pdf = save_email_pdf(body_html, folder, subject, sender, date_str)
-        if pdf:
-            files.append(pdf)
-        _log_saved("DOWNLOADED", folder_name, sender, folder, files)
-        rec = _make_record(msg, account, run_id, "DOWNLOADED", folder, folder_name,
-                           files, seller=seller, product=product,
-                           category=category, rule_source="hardcoded")
-        rec["rule_name"] = hardcoded_label(sender, subject)
-        return {"status": "saved", "record": rec}
-
-    # ── Step 2: rules ──────────────────────────────────────────────────
+    # ── Step 1: rules ──────────────────────────────────────────────────
     # Every rule is checked; exactly one match files the mail. Two or more is
     # a rule CONFLICT: the mail goes to fallbacks (with why) and waits there
     # until the rules are changed so only one matches.
@@ -550,7 +465,7 @@ def process_message(msg: dict, account: dict, run_id: str = "") -> dict:
             rec = _make_record(msg, account, run_id, "EXCLUDED", None, None, [],
                                rule_source="custom", rule=rule, data=data)
             return {"status": "excluded", "record": rec}
-        seller, product = rules.resolve_names(rule, sender, subject, body, date_str)
+        seller, product = rules.resolve_names(rule, sender, subject, body, date_str, first_att)
         base_dir = rules.destination_of(rule, data)
         category = _category_label(base_dir)
         folder_name = f"{date_str} - {sanitize(seller)} - {sanitize(product)} - {label}"
@@ -566,7 +481,7 @@ def process_message(msg: dict, account: dict, run_id: str = "") -> dict:
                            category=category, rule_source="custom", rule=rule, data=data)
         return {"status": "saved", "record": rec}
 
-    # ── Step 3: fallback (no rule, or a rule conflict) ─────────────────
+    # ── Step 2: fallback (no rule, or a rule conflict) ─────────────────
     sender_name   = extract_display_name(sender)
     subject_clean = sanitize(subject[:60])
     folder_name   = f"{date_str} - {sender_name} - {subject_clean} - {label}"
@@ -588,6 +503,7 @@ def process_message(msg: dict, account: dict, run_id: str = "") -> dict:
         "folder_name":   folder_name,
         "folder_path":   str(folder),
         "attachment_count": msg.get("attachment_count"),
+        "attachment_name": first_att or "",
         "resolved":      False,
     }
     if conflict:

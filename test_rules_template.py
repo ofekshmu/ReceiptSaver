@@ -66,6 +66,36 @@ class TestResolve(unittest.TestCase):
         spec = {"mode": "template", "template": "{subject_word:40}"}
         self.assertEqual(R.resolve_spec(spec, SENDER, SUBJECT, "", "SUG", DATE), "SUG")
 
+    def test_attachment_name_token_drops_the_extension(self):
+        self.assertEqual(R.render_template("{attachment_name}", SENDER, SUBJECT, DATE,
+                                           attachment="Invoice 2026-10.pdf"), "Invoice 2026-10")
+        self.assertEqual(R.render_template("קבלה {attachment_name}", SENDER, SUBJECT, DATE), "קבלה")
+        R.validate_template("{attachment_name}")
+
+    def test_attachment_name_extract_source(self):
+        self.assertEqual(R.extract("attachment_name", r"^([^_]+)", SENDER, SUBJECT, "",
+                                   "2026-09-08_04_29.pdf"), "2026-09-08")
+        self.assertIsNone(R.extract("attachment_name", r"^([^_]+)", SENDER, SUBJECT, "", ""))
+        spec = {"mode": "extract", "source": "attachment_name", "regex": r"^([^_]+)",
+                "fallback": "משלוח"}
+        self.assertEqual(R.validate_spec(spec), spec)
+        self.assertEqual(R.resolve_spec(spec, SENDER, SUBJECT, "", "SUG", DATE, "19_x.pdf"), "19")
+        self.assertEqual(R.resolve_spec(spec, SENDER, SUBJECT, "", "SUG", DATE), "משלוח")
+
+    def test_extract_fallback_may_be_a_template(self):
+        spec = {"mode": "extract", "source": "subject", "regex": r"receipt from (.+)",
+                "fallback": "{sender_name}"}
+        self.assertEqual(R.validate_spec(spec), spec)
+        self.assertEqual(R.resolve_spec(spec, '"Acme" <a@stripe.com>', "Payment", "", "SUG"), "Acme")
+        self.assertEqual(R.resolve_spec(spec, '"Acme" <a@stripe.com>', "receipt from Bob", "", "SUG"),
+                         "Bob")
+        with self.assertRaises(ValueError):
+            R.validate_spec(dict(spec, fallback="{nope}"))
+
+    def test_resolve_names_passes_the_attachment(self):
+        rule = {"seller": None, "product": {"mode": "template", "template": "{attachment_name}"}}
+        self.assertEqual(R.resolve_names(rule, SENDER, SUBJECT, "", DATE, "a.pdf")[1], "a")
+
     def test_one_rule_many_folders_via_match_rule(self):
         data = {"roots": [{"id": "r", "name": "r", "folder": r"C:\x", "color": "#fff"}],
                 "rules": [{"id": "grow", "name": "Grow", "root": "r", "exclude": False,

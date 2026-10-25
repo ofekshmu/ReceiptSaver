@@ -186,15 +186,6 @@ class TestRuleRouting(unittest.TestCase):
         self.assertEqual(logged[0]["attachment_count"], 0)
 
 
-class TestHardcodedLabel(unittest.TestCase):
-    def test_names_the_built_in_rule(self):
-        self.assertEqual(receipt_saver.hardcoded_label("orders@wolt.com", "x"), "Wolt")
-        self.assertEqual(receipt_saver.hardcoded_label("a@cardcom.co.il", "x"), "Cardcom")
-        self.assertEqual(receipt_saver.hardcoded_label("a@stripe.com", "x"), "Stripe")
-        self.assertEqual(receipt_saver.hardcoded_label("a@fattal.co.il", "x"), "Fattal")
-        self.assertIsNone(receipt_saver.hardcoded_label("a@nowhere.org", "x"))
-
-
 class TestGmailAttachmentNames(unittest.TestCase):
     def test_nested_parts_and_document_count(self):
         import gmail_provider, rules
@@ -252,6 +243,13 @@ class TestProcessMessageRecord(unittest.TestCase):
         receipt_saver.create_ticktick_task = lambda *a, **k: None
         self._hist = history_mod.HISTORY_FILE
         history_mod.HISTORY_FILE = self.tmp / "history.json"
+        # the former built-in rules, as the ordinary rules migrate_builtins.py writes
+        import rules, migrate_builtins
+        rules_file = self.tmp / "rules.json"
+        rules.save(migrate_builtins.convert(rules.empty(), receipts_dir=receipt_saver.RECEIPTS_DIR),
+                   rules_file)
+        self.addCleanup(setattr, rules, "RULES_FILE", rules.RULES_FILE)
+        rules.RULES_FILE = rules_file
 
     def tearDown(self):
         for name, val in self._orig.items():
@@ -274,8 +272,7 @@ class TestProcessMessageRecord(unittest.TestCase):
     def _account(self):
         return {"label": "ofek", "email": "ofek.shmuel1@gmail.com"}
 
-    def test_hardcoded_match_returns_full_record(self):
-        # electra-power is a custom rule, not hardcoded; use cellcominv (hardcoded).
+    def test_converted_builtin_rule_returns_full_record(self):
         res = receipt_saver.process_message(
             self._msg(sender="billing@cellcominv.co.il", subject="חשבונית חודשית"),
             self._account(), run_id="RID",
@@ -286,10 +283,39 @@ class TestProcessMessageRecord(unittest.TestCase):
         self.assertEqual(rec["run_id"], "RID")
         self.assertEqual(rec["action"], "DOWNLOADED")
         self.assertEqual(rec["seller"], "סלקום")
-        self.assertEqual(rec["category"], "חשבנות/אינטרנט")
-        self.assertEqual(rec["rule_source"], "hardcoded")
-        self.assertEqual(rec["rule_name"], "סלקום")        # which built-in rule
+        self.assertEqual(rec["category"], str(Path("חשבנות") / "אינטרנט"))
+        self.assertEqual(rec["rule_source"], "custom")
+        self.assertEqual((rec["rule_id"], rec["rule_name"], rec["root_name"]),
+                         ("cellcom", "סלקום", "אינטרנט"))
         self.assertEqual(rec["account"], "ofek")
+
+    def test_wolt_product_comes_from_the_attachment_name(self):
+        acct = self._account()
+        res = receipt_saver.process_message(
+            self._msg(sender="Wolt <info@wolt.com>", subject="קבלת רכישה ב-Wolt",
+                      first_attachment_name="2026-09-08_04_29_31.693_6a9f8f.pdf"), acct)
+        self.assertEqual((res["record"]["seller"], res["record"]["product"]), ("Wolt", "2026-09-08"))
+        self.assertEqual(Path(res["record"]["folder_path"]).parent, receipt_saver.RECEIPTS_DIR / "Wolt")
+        res = receipt_saver.process_message(
+            self._msg(id="m2", sender="Wolt <info@wolt.com>", subject="קבלת רכישה ב-Wolt"), acct)
+        self.assertEqual(res["record"]["product"], "משלוח")       # no attachment
+
+    def test_fattal_nyx_subject_no_longer_crashes(self):
+        # the old built-in rule called extract_display_name(sender, subject) and raised
+        res = receipt_saver.process_message(
+            self._msg(sender='"NYX Tel Aviv" <res@nyx-hotels.com>', subject="Your NYX booking"),
+            self._account())
+        self.assertEqual((res["record"]["seller"], res["record"]["product"]),
+                         ("NYX Tel Aviv", "חשבונית"))
+        self.assertEqual(res["record"]["rule_name"], "Fattal")
+
+    def test_fallback_entry_records_the_attachment_name(self):
+        import json
+        receipt_saver.process_message(
+            self._msg(sender="who@unknown-xyz.com", subject="mystery",
+                      first_attachment_name="inv_77.pdf"), self._account())
+        entry = json.loads(receipt_saver.FALLBACK_LOG_FILE.read_text(encoding="utf-8"))[0]
+        self.assertEqual(entry["attachment_name"], "inv_77.pdf")
 
     def test_fallback_returns_record_and_logs_history(self):
         res = receipt_saver.process_message(

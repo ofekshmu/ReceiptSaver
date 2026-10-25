@@ -160,12 +160,11 @@ class Api:
         rows = history.page(int(offset), int(limit))
         data = None
         for r in rows:
-            if r.get("rule_name"):
+            if r.get("rule_id"):
                 continue
             # older rows didn't record which rule handled them — work it out
-            if r.get("rule_source") == "hardcoded":
-                r["rule_name"] = receipt_saver.hardcoded_label(r.get("sender"), r.get("subject"))
-            elif r.get("rule_source") == "custom":
+            # ("hardcoded" rows were filed by the built-in rules, now ordinary rules)
+            if r.get("rule_source") in ("custom", "hardcoded"):
                 data = data if data is not None else R.load()
                 hits = R.match_all(r.get("sender") or "", r.get("subject") or "", data=data)
                 if len(hits) == 1:
@@ -362,7 +361,8 @@ class Api:
             return {"ok": False, "error": f"couldn't fetch the mail body: {e}"}
         try:
             value = C.extract(source, regex or "", entry.get("sender", ""),
-                              entry.get("subject", ""), body)
+                              entry.get("subject", ""), body,
+                              fallback_ops.entry_attachment(entry))
         except ValueError as e:
             return {"ok": False, "error": str(e)}
         return {"ok": True, "value": value}
@@ -398,7 +398,8 @@ class Api:
         except ValueError as e:
             return {"ok": False, "error": str(e)}
         return {"ok": True, "value": R.render_template(template, entry.get("sender", ""),
-                                                        entry.get("subject", ""), entry.get("date"))}
+                                                        entry.get("subject", ""), entry.get("date"),
+                                                        fallback_ops.entry_attachment(entry))}
 
     def preview_rule(self, message_id: str, rule_id: str) -> dict:
         """What an existing rule would name and file this mail as."""
@@ -415,7 +416,8 @@ class Api:
             except Exception:
                 body = ""                     # offline: fall back to the suggestion
         seller, product = R.resolve_names(rule, entry.get("sender", ""),
-                                          entry.get("subject", ""), body, entry.get("date"))
+                                          entry.get("subject", ""), body, entry.get("date"),
+                                          fallback_ops.entry_attachment(entry))
         return {"ok": True, "seller": seller, "product": product,
                 "destination": str(R.destination_of(rule, data))}
 
