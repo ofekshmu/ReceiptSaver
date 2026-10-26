@@ -225,6 +225,21 @@
     </div>
   </template>
 
+  <!-- "Move existing receipts?" after a rule changes root (offerMoveFolders in app.js) -->
+  <div id="mv-backdrop" class="mv-backdrop" hidden></div>
+  <section id="mv-dialog" class="mv-dialog" role="dialog" aria-modal="true" aria-labelledby="mv-title" hidden>
+    <header class="mv-head">
+      <h2 id="mv-title">Move existing receipts?</h2>
+      <p class="mv-sub" dir="auto"></p>
+    </header>
+    <label class="mv-all"><input type="checkbox" class="mv-all-cb"> <span>Select all</span></label>
+    <ul class="mv-list"></ul>
+    <footer class="mv-foot">
+      <button type="button" class="rv-btn mv-leave">Leave them</button>
+      <button type="button" class="rv-btn primary mv-go">Move</button>
+    </footer>
+  </section>
+
   <div id="toast-host"></div>
   <div id="win-resize-grip" title="Drag to resize"></div>
 

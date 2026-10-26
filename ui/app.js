@@ -2193,6 +2193,77 @@ function ruleCard(rule, group) {
   return card;
 }
 
+// ---- "Move existing receipts?" ----------------------------------------------
+// After rules change root (or a root changes folder) the folders they already
+// filed stay in the old folder. Offer them with checkboxes (all ticked, except
+// ones another rule's names fit too) and move the ticked ones.
+function moveDialog(folders, subHtml) {
+  return new Promise(resolve => {
+    const dlg = $("#mv-dialog"), bd = $("#mv-backdrop"), list = $(".mv-list", dlg);
+    const go = $(".mv-go", dlg), all = $(".mv-all-cb", dlg);
+    $(".mv-sub", dlg).innerHTML = subHtml;
+    list.innerHTML = "";
+    const boxes = folders.map(f => {
+      const li = el("li"), lab = el("label"), cb = el("input");
+      cb.type = "checkbox"; cb.checked = f.checked; cb.value = f.path;
+      lab.title = f.path;
+      lab.append(cb, bdiOf(f.name, "mv-name"),
+                 el("span", "mv-tag", f.source === "history" ? "History" : "by name"));
+      if (f.also && f.also.length) {
+        const a = el("span", "mv-also", `also fits ${f.also.join(", ")}`);
+        a.title = "Another rule in this folder gives the same folder names — tick it if it's this rule's";
+        lab.appendChild(a);
+      }
+      li.appendChild(lab); list.appendChild(li);
+      return cb;
+    });
+    const sync = () => {
+      const n = boxes.filter(b => b.checked).length;
+      go.textContent = n ? `Move ${plural(n, "folder")}` : "Move";
+      go.disabled = !n;
+      all.checked = n === boxes.length; all.indeterminate = n > 0 && n < boxes.length;
+    };
+    boxes.forEach(b => b.addEventListener("change", sync));
+    all.onchange = () => { boxes.forEach(b => { b.checked = all.checked; }); sync(); };
+    sync();
+    const close = value => {
+      dlg.classList.remove("open"); bd.classList.remove("open");
+      document.removeEventListener("keydown", onKey, true);
+      setTimeout(() => { dlg.hidden = true; bd.hidden = true; }, 180);
+      resolve(value);
+    };
+    const onKey = e => { if (e.key === "Escape") { e.stopPropagation(); close(null); } };
+    document.addEventListener("keydown", onKey, true);
+    $(".mv-leave", dlg).onclick = () => close(null);
+    bd.onclick = () => close(null);
+    go.onclick = () => close(boxes.filter(b => b.checked).map(b => b.value));
+    bd.hidden = false; dlg.hidden = false;
+    requestAnimationFrame(() => { bd.classList.add("open"); dlg.classList.add("open"); go.focus(); });
+  });
+}
+
+const escHtml = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+
+async function offerMoveFolders(ruleIds, oldFolder, dest, what) {
+  if (!oldFolder || !dest || !dest.folder || oldFolder === dest.folder || !ruleIds.length) return;
+  let res;
+  try { res = await api().rule_filed_folders(ruleIds, oldFolder); } catch (_) { return; }
+  if (!res.ok || !res.folders.length) return;
+  const from = oldFolder.split(/[\\/]/).filter(Boolean).pop();
+  const paths = await moveDialog(res.folders,
+    `${plural(res.folders.length, "folder")} filed by <b dir="auto">${escHtml(what)}</b> ` +
+    `${res.folders.length === 1 ? "is" : "are"} still in <b dir="auto">${escHtml(from)}</b>. ` +
+    `Move the ticked ones to <b dir="auto">${escHtml(dest.name)}</b>? They keep their names.`);
+  if (!paths || !paths.length) return;
+  const out = await api().move_filed_folders(paths, dest.folder);
+  if (!out.ok) { toast(out.error || "Couldn't move the folders", true); return; }
+  const failed = out.failed || [];
+  toast(`Moved ${plural(out.moved, "folder")} to ${dest.name}` +
+        (failed.length ? ` — ${failed.length} with a problem: ${failed.map(f => `${f.name} (${f.error})`).join("; ")}` : ""),
+        failed.length > 0);
+  rulesChanged();
+}
+
 // ---- popover menu ----------------------------------------------------------
 function rvMenu(anchor, sections) {
   const menu = $("#rv-menu");
@@ -2226,8 +2297,11 @@ function rvRuleMenu(anchor, rule) {
   rvMenu(anchor, [
     { title: rule.exclude ? null : "Move to root", items: rule.exclude ? [] : RV.roots
         .filter(r => r.id !== rule.root)
-        .map(r => ({ label: r.name, run: async () =>
-          rvApply(await api().rule_update(rule.id, { root: r.id }), `Moved to ${r.name}`) })) },
+        .map(r => ({ label: r.name, run: async () => {
+          const old = (RV.roots.find(x => x.id === rule.root) || {}).folder;
+          if (rvApply(await api().rule_update(rule.id, { root: r.id }), `Moved to ${r.name}`))
+            offerMoveFolders([rule.id], old, r, rule.name);
+        } })) },
     { title: "Merge into", items: siblings.map(o => ({ label: o.name, run: async () => {
         if (!confirm(`Move the ${plural((rule.match || []).length, "alternative")} of “${rule.name}” into “${o.name}” and delete “${rule.name}”?\n\nThose emails will then be named the way “${o.name}” says.`)) return;
         rvApply(await api().rule_merge(rule.id, o.id), `Merged into ${o.name}`);
@@ -2251,7 +2325,11 @@ function rvRootMenu(anchor, g) {
     sections.push({ title: `Delete root — move its ${plural(g.rules.length, "rule")} to`, items: others.map(o => ({
       label: o.name, danger: true, run: async () => {
         if (!confirm(`Move ${plural(g.rules.length, "rule")} to “${o.name}” and delete root “${g.name}”? (Its folder on disk is not touched.)`)) return;
-        if (rvApply(await api().root_delete(g.id, o.id), "Root deleted")) rvSelect(o.id);
+        if (rvApply(await api().root_delete(g.id, o.id), "Root deleted")) {
+          rvSelect(o.id);
+          offerMoveFolders(g.rules.map(r => r.id), g.folder, o,
+                           g.rules.length === 1 ? g.rules[0].name : `the ${g.rules.length} rules of ${g.name}`);
+        }
       } })) });
   }
   rvMenu(anchor, sections);
@@ -2357,6 +2435,11 @@ async function rvRootDrawer(root) {
     const res = root ? await api().root_update(root.id, { name, folder: f, color })
                      : await api().root_add(name, f, color);
     const ok = rvApply(res, root ? "Root saved" : `Added root ${name}`);
+    if (ok && root && root.folder !== f) {
+      const ids = RV.rules.filter(r => !r.exclude && r.root === root.id).map(r => r.id);
+      offerMoveFolders(ids, root.folder, { name, folder: f },
+                       ids.length === 1 ? RV.rules.find(r => r.id === ids[0]).name : `the rules of ${name}`);
+    }
     if (ok && !root) {
       const added = res.data.roots.find(r => r.name === name && r.folder === f);
       if (added) rvSelect(added.id);

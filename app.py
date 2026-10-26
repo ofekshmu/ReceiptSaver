@@ -318,6 +318,30 @@ class Api:
     def rule_update(self, rule_id: str, patch: dict) -> dict:
         return self._rules_write(lambda R, d: R.update_rule(d, rule_id, patch or {}))
 
+    def rule_filed_folders(self, rule_ids: list, old_folder: str) -> dict:
+        """Receipt folders these rules already filed into `old_folder` (called
+        after a rule moved root or a root moved folder) — see relocate.py."""
+        import relocate
+        try:
+            return {"ok": True, "folders": relocate.filed_folders(
+                rule_ids, old_folder, manual_dir=receipt_saver.MANUAL_DIR)}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def move_filed_folders(self, paths: list, dest_folder: str) -> dict:
+        """Move the ticked folders into `dest_folder` (a root's folder)."""
+        import relocate
+        import rules as R
+        roots = {os.path.normcase(os.path.normpath(r.get("folder") or ""))
+                 for r in R.load().get("roots", [])}
+        if os.path.normcase(os.path.normpath(dest_folder or "")) not in roots:
+            return {"ok": False, "error": "that folder isn't a root's folder"}
+        try:
+            out = relocate.move_folders(paths, dest_folder, manual_dir=receipt_saver.MANUAL_DIR)
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+        return {"ok": True, **out}
+
     def rule_delete(self, rule_id: str) -> dict:
         return self._rules_write(lambda R, d: R.delete_rule(d, rule_id))
 
