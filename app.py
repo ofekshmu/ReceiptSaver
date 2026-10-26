@@ -156,7 +156,23 @@ class Api:
 
     # -- history ---------------------------------------------------------
     def get_history(self, offset: int = 0, limit: int = 50) -> list:
-        return history.page(int(offset), int(limit))
+        import rules as R
+        rows = history.page(int(offset), int(limit))
+        data = None
+        for r in rows:
+            if r.get("rule_id"):
+                continue
+            # older rows didn't record which rule handled them — work it out
+            # ("hardcoded" rows were filed by the built-in rules, now ordinary rules)
+            if r.get("rule_source") in ("custom", "hardcoded"):
+                data = data if data is not None else R.load()
+                hits = R.match_all(r.get("sender") or "", r.get("subject") or "", data=data)
+                if len(hits) == 1:
+                    rule = hits[0]["rule"]
+                    root = R.find_root(data, rule.get("root")) or {}
+                    r.update(rule_id=rule.get("id"), rule_name=rule.get("name"),
+                             root_name=root.get("name"), rule_inferred=True)
+        return rows
 
     # -- fallbacks -----------------------------------------------------
     def _load_fallbacks(self) -> list:
@@ -166,7 +182,22 @@ class Api:
             return []
 
     def get_fallbacks(self) -> list:
-        return [e for e in self._load_fallbacks() if not e.get("resolved")]
+        out = []
+        for e in self._load_fallbacks():
+            if e.get("resolved"):
+                continue
+            if e.get("conflict"):              # the stored mail text stays on disk
+                e = {**e, "conflict": {k: v for k, v in e["conflict"].items() if k != "body"}}
+            out.append(e)
+        return out
+
+    def _recheck_conflicts(self) -> dict:
+        """After any rule change: file / clear fallbacks whose conflict is gone."""
+        try:
+            return fallback_ops.recheck_conflicts(fallback_log_path=self._fallback_log_path)
+        except Exception as e:
+            _log(f"conflict re-check failed: {e!r}")
+            return {"filed": 0, "cleared": 0, "still": 0, "error": str(e)}
 
     def _fallback_by_id(self, message_id: str):
         for e in self._load_fallbacks():
@@ -176,17 +207,37 @@ class Api:
 
     def suggest_fallback(self, message_id: str) -> dict:
         entry = self._fallback_by_id(message_id)
-        return fallback_ops.suggest(entry) if entry else {}
+        if not entry:
+            return {}
+        return {**fallback_ops.suggest(entry),
+                "attachment_count": self._attachment_count(entry)}
+
+    @staticmethod
+    def _attachment_count(entry: dict):
+        """Documents attached to a fallback mail: recorded at scan time, else
+        counted from its folder (minus email.pdf; images never count)."""
+        import rules as C
+        if entry.get("attachment_count") is not None:
+            return entry["attachment_count"]
+        try:
+            names = [n for n in os.listdir(entry.get("folder_path") or "")
+                     if n.lower() != "email.pdf"]
+        except OSError:
+            return None
+        return C.count_documents(names)
 
     def apply_fallback(self, message_id: str, decision: dict) -> dict:
         entry = self._fallback_by_id(message_id)
         if not entry:
             return {"ok": False, "error": "entry not found"}
         try:
-            return fallback_ops.apply_decision(entry, decision,
-                                               fallback_log_path=self._fallback_log_path)
+            res = fallback_ops.apply_decision(entry, decision,
+                                              fallback_log_path=self._fallback_log_path)
         except Exception as e:
             return {"ok": False, "error": str(e)}
+        if res.get("ok") and decision.get("kind") in ("rule", "new_rule", "exclude"):
+            res["conflicts"] = self._recheck_conflicts()       # the rules just changed
+        return res
 
     def handoff(self, message_ids: list) -> dict:
         entries = [e for e in self._load_fallbacks()
@@ -227,45 +278,81 @@ class Api:
     def open_path(self, path: str) -> dict:
         return self.open_folder(path)
 
-    # -- bill categories (categories.json) ------------------------------
-    def _cat_write(self, mutate) -> dict:
-        """load -> mutate(cats) -> (save if truthy) -> return {ok, categories}."""
-        import categories as C
+    # -- rules + roots (rules.json) ----------------------------------------
+    def _rules_write(self, mutate) -> dict:
+        """load -> mutate(R, data) -> save -> {ok, data, conflicts}; mutate
+        returning False means "not found / no change"; a ValueError becomes
+        {ok: False, error}. Every successful change re-checks rule conflicts."""
+        import rules as R
         try:
-            cats = C.load_categories()
-            changed = mutate(C, cats)
-            if changed is False:
+            data = R.load()
+            if mutate(R, data) is False:
                 return {"ok": False, "error": "no change / not found"}
-            C.save_categories(cats)
-            return {"ok": True, "categories": cats}
+            R.save(data)
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+        return {"ok": True, "data": data, "conflicts": self._recheck_conflicts()}
+
+    def list_rules(self) -> dict:
+        """{roots, rules, counts} — counts = rules per root id."""
+        import rules as R
+        data = R.load()
+        return {**data, "counts": R.rule_counts(data)}
+
+    def root_add(self, name: str, folder: str, color: str = None) -> dict:
+        return self._rules_write(lambda R, d: d["roots"].append(
+            R.new_root(name, folder, color=color, data=d)) or True)
+
+    def root_update(self, root_id: str, patch: dict) -> dict:
+        return self._rules_write(lambda R, d: R.update_root(d, root_id, patch or {}))
+
+    def root_delete(self, root_id: str, move_to: str = None) -> dict:
+        return self._rules_write(lambda R, d: R.delete_root(d, root_id, move_to))
+
+    def rule_add(self, name: str, config: dict = None) -> dict:
+        cfg = config or {}
+        return self._rules_write(lambda R, d: d["rules"].append(
+            R.new_rule(name, root=cfg.get("root"), seller=cfg.get("seller"),
+                       product=cfg.get("product"), match=cfg.get("match"), data=d)) or True)
+
+    def rule_update(self, rule_id: str, patch: dict) -> dict:
+        return self._rules_write(lambda R, d: R.update_rule(d, rule_id, patch or {}))
+
+    def rule_filed_folders(self, rule_ids: list, old_folder: str) -> dict:
+        """Receipt folders these rules already filed into `old_folder` (called
+        after a rule moved root or a root moved folder) — see relocate.py."""
+        import relocate
+        try:
+            return {"ok": True, "folders": relocate.filed_folders(
+                rule_ids, old_folder, manual_dir=receipt_saver.MANUAL_DIR)}
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
-    def list_categories(self) -> list:
-        import categories as C
-        return C.load_categories()
+    def move_filed_folders(self, paths: list, dest_folder: str) -> dict:
+        """Move the ticked folders into `dest_folder` (a root's folder)."""
+        import relocate
+        import rules as R
+        roots = {os.path.normcase(os.path.normpath(r.get("folder") or ""))
+                 for r in R.load().get("roots", [])}
+        if os.path.normcase(os.path.normpath(dest_folder or "")) not in roots:
+            return {"ok": False, "error": "that folder isn't a root's folder"}
+        try:
+            out = relocate.move_folders(paths, dest_folder, manual_dir=receipt_saver.MANUAL_DIR)
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+        return {"ok": True, **out}
 
-    def category_add(self, name: str, config: dict = None) -> dict:
-        cfg = config or {}
-        return self._cat_write(lambda C, cats: cats.append(
-            C.new_category(name, destination=cfg.get("destination"),
-                           seller=cfg.get("seller"), product=cfg.get("product"),
-                           exclude=cfg.get("exclude", False), categories=cats)) or True)
+    def rule_delete(self, rule_id: str) -> dict:
+        return self._rules_write(lambda R, d: R.delete_rule(d, rule_id))
 
-    def category_update(self, category_id: str, patch: dict) -> dict:
-        return self._cat_write(lambda C, cats: C.update_category(cats, category_id, patch or {}))
+    def rule_merge(self, src_id: str, dst_id: str) -> dict:
+        return self._rules_write(lambda R, d: R.merge_rules(d, src_id, dst_id))
 
-    def category_delete(self, category_id: str) -> dict:
-        return self._cat_write(lambda C, cats: C.delete_category(cats, category_id))
+    def rule_remove_match(self, rule_id: str, index: int) -> dict:
+        return self._rules_write(lambda R, d: R.remove_match(d, rule_id, int(index)))
 
-    def category_merge(self, src_id: str, dst_id: str) -> dict:
-        return self._cat_write(lambda C, cats: C.merge_categories(cats, src_id, dst_id))
-
-    def category_remove_match(self, category_id: str, index: int) -> dict:
-        return self._cat_write(lambda C, cats: C.remove_match(cats, category_id, int(index)))
-
-    def category_add_match(self, category_id: str, entry: dict) -> dict:
-        return self._cat_write(lambda C, cats: C.add_match(cats, category_id, entry or {}))
+    def rule_add_match(self, rule_id: str, entry: dict) -> dict:
+        return self._rules_write(lambda R, d: R.add_match(d, rule_id, entry or {}))
 
     # -- fallback form helpers -------------------------------------------
     def _fetch_text(self, entry: dict) -> dict:
@@ -288,7 +375,7 @@ class Api:
     def preview_extract(self, message_id: str, source: str, regex: str) -> dict:
         """Run an extraction rule against one fallback mail, exactly as the scan
         engine would (Python `re`). value is None on a miss."""
-        import categories as C
+        import rules as C
         entry = self._fallback_by_id(message_id)
         if not entry:
             return {"ok": False, "error": "entry not found"}
@@ -298,33 +385,70 @@ class Api:
             return {"ok": False, "error": f"couldn't fetch the mail body: {e}"}
         try:
             value = C.extract(source, regex or "", entry.get("sender", ""),
-                              entry.get("subject", ""), body)
+                              entry.get("subject", ""), body,
+                              fallback_ops.entry_attachment(entry))
         except ValueError as e:
             return {"ok": False, "error": str(e)}
         return {"ok": True, "value": value}
 
-    def preview_category(self, message_id: str, category_id: str) -> dict:
-        """What an existing category would name and file this mail as."""
-        import categories as C
+    def keyword_suggestions(self, message_id: str, include_body: bool = False) -> dict:
+        """Keyword chips for building a match rule from one fallback mail.
+        Without `include_body` this never touches the network."""
+        import keywords
         entry = self._fallback_by_id(message_id)
-        cat = C.find(C.load_categories(), category_id)
-        if not entry or not cat:
-            return {"ok": False, "error": "entry or category not found"}
+        if not entry:
+            return {"ok": False, "error": "entry not found"}
+        body, body_error = "", None
+        if include_body:
+            try:
+                body = self._body(entry)
+            except Exception as e:
+                body_error = f"couldn't fetch the mail body: {e}"
+        out = {"ok": True, **keywords.suggest(entry.get("sender", ""),
+                                              entry.get("subject", ""), body)}
+        if body_error:
+            out["body_error"] = body_error
+        return out
+
+    def preview_template(self, message_id: str, template: str) -> dict:
+        """Fill a seller/product template for one fallback mail, exactly as the
+        scan would. value is "" when the template comes out empty."""
+        import rules as R
+        entry = self._fallback_by_id(message_id)
+        if not entry:
+            return {"ok": False, "error": "entry not found"}
+        try:
+            R.validate_template(template)
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
+        return {"ok": True, "value": R.render_template(template, entry.get("sender", ""),
+                                                        entry.get("subject", ""), entry.get("date"),
+                                                        fallback_ops.entry_attachment(entry))}
+
+    def preview_rule(self, message_id: str, rule_id: str) -> dict:
+        """What an existing rule would name and file this mail as."""
+        import rules as R
+        entry = self._fallback_by_id(message_id)
+        data = R.load()
+        rule = R.find_rule(data, rule_id)
+        if not entry or not rule:
+            return {"ok": False, "error": "entry or rule not found"}
         body = ""
-        if C.needs_body(cat):
+        if R.needs_body(rule):
             try:
                 body = self._body(entry)
             except Exception:
                 body = ""                     # offline: fall back to the suggestion
-        seller, product = C.resolve_names(cat, entry.get("sender", ""),
-                                          entry.get("subject", ""), body)
+        seller, product = R.resolve_names(rule, entry.get("sender", ""),
+                                          entry.get("subject", ""), body, entry.get("date"),
+                                          fallback_ops.entry_attachment(entry))
         return {"ok": True, "seller": seller, "product": product,
-                "destination": str(C.destination_of(cat))}
+                "destination": str(R.destination_of(rule, data))}
 
     def destination_suggestions(self) -> list:
-        """Destinations for the picker, most used first: category destinations +
-        the folders History filed into + every root (never the fallback dir)."""
-        import categories as C
+        """Destinations for the picker, most used first: root folders + the
+        folders History filed into + every receipt root (never the fallback dir)."""
+        import rules as R
         manual = receipt_roots.MANUAL_DIR
         roots = [r for r in receipt_roots.discover_roots()
                  if not receipt_roots._inside(r["path"], manual)]
@@ -336,9 +460,10 @@ class Api:
             key = receipt_roots._norm(path)
             counts.setdefault(key, [str(path), 0])[1] += n
 
-        for cat in C.load_categories():
-            if not cat.get("exclude"):
-                bump(cat.get("destination"))
+        data = R.load()
+        counts_by_root = R.rule_counts(data)
+        for root in data["roots"]:
+            bump(root.get("folder"), counts_by_root.get(root["id"], 0) or 1)
         for row in history.load():
             if row.get("action") != "FALLBACK" and row.get("folder_path"):
                 bump(os.path.dirname(row["folder_path"]))

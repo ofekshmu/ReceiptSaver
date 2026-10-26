@@ -603,5 +603,25 @@
         "body_contains": "מחסני חשמל"
       }
     ]
+  },
+  {
+    "id": "cat-איזיטוגיפט",
+    "name": "איזי טו גיפט",
+    "destination": "C:\\Users\\ofeks\\OneDrive\\Documents\\קבלות",
+    "seller": {
+      "mode": "fixed",
+      "value": "איזי טו גיפט"
+    },
+    "product": null,
+    "exclude": false,
+    "match": [
+      {
+        "sender_contains": "grow.security",
+        "subject_contains": [
+          "איזי טו גיפט בע\"מ",
+          "קבלה"
+        ]
+      }
+    ]
   }
 ]

@@ -74,6 +74,26 @@ def upsert(record_id: str, record: dict, path: Path = None) -> None:
         _write(rows, path)
 
 
+def repath(new_path_for, path: Path = None, category=None) -> int:
+    """Point rows at moved folders: `new_path_for(folder_path)` returns the new
+    Path, or None to leave the row alone. Also sets `category` when given.
+    Returns how many rows changed."""
+    path = path or HISTORY_FILE
+    with _LOCK:
+        rows = load(path)
+        n = 0
+        for r in rows:
+            new = new_path_for(r["folder_path"]) if r.get("folder_path") else None
+            if new is not None:
+                r.update(folder_path=str(new), folder_name=Path(new).name)
+                if category is not None or "category" in r:
+                    r["category"] = category
+                n += 1
+        if n:
+            _write(rows, path)
+        return n
+
+
 def page(offset: int = 0, limit: int = 50, path: Path = None) -> list:
     rows = load(path or HISTORY_FILE)
     rows = list(reversed(rows))

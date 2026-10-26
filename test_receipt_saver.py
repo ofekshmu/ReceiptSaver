@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from receipt_saver import parse_date, unique_folder
-from categories import match_category
+from rules import match_rule as match_category      # live rules.json
 import receipt_saver
 import history as history_mod
 
@@ -67,27 +67,29 @@ class TestUpappRule(unittest.TestCase):
         self.assertIsNone(result)
 
 
-class TestCategoryRouting(unittest.TestCase):
-    """process_message files a category match into its destination."""
+class TestRuleRouting(unittest.TestCase):
+    """process_message files a rule match into its root's folder."""
 
     def setUp(self):
-        import json, categories
+        import json, rules
         self.tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
         self.dest = self.tmp / "bills" / "חשמל"
-        cats_file = self.tmp / "categories.json"
-        cats_file.write_text(json.dumps([
-            {"id": "elec", "name": "חשמל", "destination": str(self.dest),
-             "seller": {"mode": "fixed", "value": "חברת חשמל"},
-             "product": {"mode": "extract", "source": "subject", "regex": r"חשבון (\d+)"},
-             "exclude": False, "match": [{"sender_contains": "iectest.co.il"}]},
-            {"id": "excluded", "name": "(excluded)", "exclude": True, "destination": None,
-             "seller": None, "product": None,
-             "match": [{"sender_contains": "spam.example", "subject_contains": "מבצע"}]},
-        ], ensure_ascii=False), encoding="utf-8")
-        orig = categories.CATEGORIES_FILE
-        categories.CATEGORIES_FILE = cats_file
-        self.addCleanup(setattr, categories, "CATEGORIES_FILE", orig)
+        rules_file = self.tmp / "rules.json"
+        rules_file.write_text(json.dumps({
+            "roots": [{"id": "elec", "name": "חשמל", "folder": str(self.dest), "color": "#fff"}],
+            "rules": [
+                {"id": "elec", "name": "חשמל", "root": "elec",
+                 "seller": {"mode": "fixed", "value": "חברת חשמל"},
+                 "product": {"mode": "extract", "source": "subject", "regex": r"חשבון (\d+)"},
+                 "exclude": False, "match": [{"sender_contains": "iectest.co.il"}]},
+                {"id": "excluded", "name": "(excluded)", "exclude": True, "root": None,
+                 "seller": None, "product": None,
+                 "match": [{"sender_contains": "spam.example", "subject_contains": "מבצע"}]},
+            ]}, ensure_ascii=False), encoding="utf-8")
+        orig = rules.RULES_FILE
+        rules.RULES_FILE = rules_file
+        self.addCleanup(setattr, rules, "RULES_FILE", orig)
         for name in ("save_email_pdf", "create_ticktick_task"):
             self.addCleanup(setattr, receipt_saver, name, getattr(receipt_saver, name))
             setattr(receipt_saver, name, lambda *a, **k: None)
@@ -109,10 +111,90 @@ class TestCategoryRouting(unittest.TestCase):
         self.assertEqual(Path(rec["folder_path"]).parent, self.dest)
         self.assertEqual(rec["rule_source"], "custom")
 
+    def test_saved_record_names_the_rule_and_root(self):
+        res = receipt_saver.process_message(self._msg("bill@iectest.co.il", "חשבון 5"),
+                                            {"label": "ofek", "email": "o@x"})
+        rec = res["record"]
+        self.assertEqual((rec["rule_id"], rec["rule_name"], rec["root_name"]), ("elec", "חשמל", "חשמל"))
+
+    def test_two_matching_rules_is_a_conflict_sent_to_fallbacks(self):
+        import json, rules
+        data = json.loads(rules.RULES_FILE.read_text(encoding="utf-8"))
+        data["rules"].append({"id": "elec2", "name": "חשמל נכס", "root": "elec", "exclude": False,
+                              "seller": None, "product": None,
+                              "match": [{"sender_contains": "iectest.co.il", "subject_contains": "חשבון"}]})
+        rules.RULES_FILE.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        for name in ("FALLBACK_LOG_FILE", "MANUAL_DIR"):
+            self.addCleanup(setattr, receipt_saver, name, getattr(receipt_saver, name))
+        receipt_saver.FALLBACK_LOG_FILE = self.tmp / "fallback_log.json"
+        receipt_saver.MANUAL_DIR = self.tmp / "manual"
+        msg = dict(self._msg("bill@iectest.co.il", "חשבון 7"), body_text="גוף המייל")
+        res = receipt_saver.process_message(msg, {"label": "ofek", "email": "o@x"})
+        self.assertEqual(res["status"], "fallback")
+        self.assertEqual(res["record"]["conflict_rules"], ["חשמל", "חשמל נכס"])
+        entry = json.loads(receipt_saver.FALLBACK_LOG_FILE.read_text(encoding="utf-8"))[0]
+        self.assertEqual([r["id"] for r in entry["conflict"]["rules"]], ["elec", "elec2"])
+        self.assertEqual(entry["conflict"]["rules"][1]["alt"],
+                         {"sender_contains": "iectest.co.il", "subject_contains": "חשבון"})
+        self.assertEqual(entry["conflict"]["body"], "גוף המייל")
+        self.assertEqual(Path(entry["folder_path"]).parent, receipt_saver.MANUAL_DIR)
+
+    def test_rule_plus_exclude_rule_is_a_conflict_too(self):
+        import json, rules
+        data = json.loads(rules.RULES_FILE.read_text(encoding="utf-8"))
+        data["rules"][1]["match"].append({"sender_contains": "iectest.co.il"})
+        rules.RULES_FILE.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        for name in ("FALLBACK_LOG_FILE", "MANUAL_DIR"):
+            self.addCleanup(setattr, receipt_saver, name, getattr(receipt_saver, name))
+        receipt_saver.FALLBACK_LOG_FILE = self.tmp / "fallback_log.json"
+        receipt_saver.MANUAL_DIR = self.tmp / "manual"
+        res = receipt_saver.process_message(self._msg("bill@iectest.co.il", "חשבון 1"),
+                                            {"label": "ofek", "email": "o@x"})
+        self.assertEqual(res["status"], "fallback")
+        self.assertEqual(res["record"]["conflict_rules"], ["חשמל", "(excluded)"])
+
+    def test_template_names_use_the_mail_date(self):
+        import json, rules
+        data = json.loads(rules.RULES_FILE.read_text(encoding="utf-8"))
+        data["rules"][0]["product"] = {"mode": "template", "template": "חשבון {month}-{year}"}
+        rules.RULES_FILE.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        res = receipt_saver.process_message(self._msg("bill@iectest.co.il", "חשבון 1"),
+                                            {"label": "ofek", "email": "o@x"})
+        self.assertEqual(res["record"]["product"], "חשבון 07-2026")
+
     def test_exclude(self):
         res = receipt_saver.process_message(self._msg("x@spam.example", "מבצע ענק"),
                                             {"label": "ofek", "email": "o@x"})
         self.assertEqual(res["status"], "excluded")
+
+    def test_attachment_condition_uses_message_count(self):
+        import json, rules
+        data = json.loads(rules.RULES_FILE.read_text(encoding="utf-8"))
+        data["rules"][0]["match"][0]["attachments"] = "one"
+        rules.RULES_FILE.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        orig = receipt_saver.FALLBACK_LOG_FILE, receipt_saver.MANUAL_DIR
+        self.addCleanup(setattr, receipt_saver, "FALLBACK_LOG_FILE", orig[0])
+        self.addCleanup(setattr, receipt_saver, "MANUAL_DIR", orig[1])
+        receipt_saver.FALLBACK_LOG_FILE = self.tmp / "fallback_log.json"
+        receipt_saver.MANUAL_DIR = self.tmp / "manual"
+        acct = {"label": "ofek", "email": "o@x"}
+        one = dict(self._msg("bill@iectest.co.il", "חשבון 1"), attachment_count=1)
+        none = dict(self._msg("bill@iectest.co.il", "חשבון 2"), attachment_count=0, id="m2")
+        self.assertEqual(receipt_saver.process_message(one, acct)["status"], "saved")
+        self.assertEqual(receipt_saver.process_message(none, acct)["status"], "fallback")
+        logged = json.loads(receipt_saver.FALLBACK_LOG_FILE.read_text(encoding="utf-8"))
+        self.assertEqual(logged[0]["attachment_count"], 0)
+
+
+class TestGmailAttachmentNames(unittest.TestCase):
+    def test_nested_parts_and_document_count(self):
+        import gmail_provider, rules
+        payload = {"parts": [{"filename": "a.pdf"},
+                             {"filename": "", "parts": [{"filename": "logo.png"},
+                                                        {"filename": "b.PDF"}]}]}
+        names = gmail_provider._attachment_names(payload)
+        self.assertEqual(names, ["a.pdf", "logo.png", "b.PDF"])
+        self.assertEqual(rules.count_documents(names), 2)
 
 
 class TestUniqueFolder(unittest.TestCase):
@@ -161,6 +243,13 @@ class TestProcessMessageRecord(unittest.TestCase):
         receipt_saver.create_ticktick_task = lambda *a, **k: None
         self._hist = history_mod.HISTORY_FILE
         history_mod.HISTORY_FILE = self.tmp / "history.json"
+        # the former built-in rules, as the ordinary rules migrate_builtins.py writes
+        import rules, migrate_builtins
+        rules_file = self.tmp / "rules.json"
+        rules.save(migrate_builtins.convert(rules.empty(), receipts_dir=receipt_saver.RECEIPTS_DIR),
+                   rules_file)
+        self.addCleanup(setattr, rules, "RULES_FILE", rules.RULES_FILE)
+        rules.RULES_FILE = rules_file
 
     def tearDown(self):
         for name, val in self._orig.items():
@@ -183,8 +272,7 @@ class TestProcessMessageRecord(unittest.TestCase):
     def _account(self):
         return {"label": "ofek", "email": "ofek.shmuel1@gmail.com"}
 
-    def test_hardcoded_match_returns_full_record(self):
-        # electra-power is a custom rule, not hardcoded; use cellcominv (hardcoded).
+    def test_converted_builtin_rule_returns_full_record(self):
         res = receipt_saver.process_message(
             self._msg(sender="billing@cellcominv.co.il", subject="חשבונית חודשית"),
             self._account(), run_id="RID",
@@ -195,9 +283,39 @@ class TestProcessMessageRecord(unittest.TestCase):
         self.assertEqual(rec["run_id"], "RID")
         self.assertEqual(rec["action"], "DOWNLOADED")
         self.assertEqual(rec["seller"], "סלקום")
-        self.assertEqual(rec["category"], "חשבנות/אינטרנט")
-        self.assertEqual(rec["rule_source"], "hardcoded")
+        self.assertEqual(rec["category"], str(Path("חשבנות") / "אינטרנט"))
+        self.assertEqual(rec["rule_source"], "custom")
+        self.assertEqual((rec["rule_id"], rec["rule_name"], rec["root_name"]),
+                         ("cellcom", "סלקום", "אינטרנט"))
         self.assertEqual(rec["account"], "ofek")
+
+    def test_wolt_product_comes_from_the_attachment_name(self):
+        acct = self._account()
+        res = receipt_saver.process_message(
+            self._msg(sender="Wolt <info@wolt.com>", subject="קבלת רכישה ב-Wolt",
+                      first_attachment_name="2026-09-08_04_29_31.693_6a9f8f.pdf"), acct)
+        self.assertEqual((res["record"]["seller"], res["record"]["product"]), ("Wolt", "2026-09-08"))
+        self.assertEqual(Path(res["record"]["folder_path"]).parent, receipt_saver.RECEIPTS_DIR / "Wolt")
+        res = receipt_saver.process_message(
+            self._msg(id="m2", sender="Wolt <info@wolt.com>", subject="קבלת רכישה ב-Wolt"), acct)
+        self.assertEqual(res["record"]["product"], "משלוח")       # no attachment
+
+    def test_fattal_nyx_subject_no_longer_crashes(self):
+        # the old built-in rule called extract_display_name(sender, subject) and raised
+        res = receipt_saver.process_message(
+            self._msg(sender='"NYX Tel Aviv" <res@nyx-hotels.com>', subject="Your NYX booking"),
+            self._account())
+        self.assertEqual((res["record"]["seller"], res["record"]["product"]),
+                         ("NYX Tel Aviv", "חשבונית"))
+        self.assertEqual(res["record"]["rule_name"], "Fattal")
+
+    def test_fallback_entry_records_the_attachment_name(self):
+        import json
+        receipt_saver.process_message(
+            self._msg(sender="who@unknown-xyz.com", subject="mystery",
+                      first_attachment_name="inv_77.pdf"), self._account())
+        entry = json.loads(receipt_saver.FALLBACK_LOG_FILE.read_text(encoding="utf-8"))[0]
+        self.assertEqual(entry["attachment_name"], "inv_77.pdf")
 
     def test_fallback_returns_record_and_logs_history(self):
         res = receipt_saver.process_message(

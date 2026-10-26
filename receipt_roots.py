@@ -2,16 +2,15 @@
 receipt_roots.py
 ----------------
 Discover every destination root receipts can land in — the fixed dirs plus
-every category `destination` in categories.json that isn't already inside one
-of them — and guard filesystem access so the UI's browse() can never walk
-outside one of them.
+every root folder in rules.json that isn't already inside one of them — and
+guard filesystem access so the UI's browse() can never walk outside them.
 """
 
 import os
 from pathlib import Path
 
 import receipt_saver
-import categories
+import rules
 
 RECEIPTS_DIR    = receipt_saver.RECEIPTS_DIR
 MANUAL_DIR      = receipt_saver.MANUAL_DIR
@@ -33,13 +32,9 @@ def _inside(path, root) -> bool:
     return a == b or a.startswith(b.rstrip("\\/") + os.sep)
 
 
-def discover_roots(categories_path: Path = None) -> list:
+def discover_roots(rules_path: Path = None) -> list:
     out = [{"label": label, "path": str(path)} for label, path in _FIXED]
-    dests = []
-    for cat in categories.load_categories(categories_path):
-        d = cat.get("destination")
-        if d and not cat.get("exclude"):
-            dests.append(d)
+    dests = [r["folder"] for r in rules.load(rules_path).get("roots", []) if r.get("folder")]
     # outermost first, so a nested destination folds into its parent root
     for d in sorted(dests, key=lambda p: len(_norm(p))):
         if any(_inside(d, r["path"]) for r in out):

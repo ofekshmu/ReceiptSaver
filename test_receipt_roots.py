@@ -10,16 +10,16 @@ import receipt_roots
 class TestDiscoverRoots(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
-        self.cats = self.tmp / "categories.json"
+        self.cats = self.tmp / "rules.json"
 
     def _write(self, dests):
-        cats = [{"id": f"c{i}", "name": f"c{i}", "destination": d, "exclude": False,
-                 "seller": None, "product": None, "match": []}
-                for i, d in enumerate(dests)]
-        self.cats.write_text(json.dumps(cats, ensure_ascii=False), encoding="utf-8")
+        roots = [{"id": f"r{i}", "name": f"r{i}", "folder": d, "color": "#fff"}
+                 for i, d in enumerate(dests)]
+        self.cats.write_text(json.dumps({"roots": roots, "rules": []}, ensure_ascii=False),
+                             encoding="utf-8")
 
     def roots(self):
-        return receipt_roots.discover_roots(categories_path=self.cats)
+        return receipt_roots.discover_roots(rules_path=self.cats)
 
     def test_fixed_roots_present_and_ordered(self):
         self._write([])
@@ -36,7 +36,7 @@ class TestDiscoverRoots(unittest.TestCase):
                      str(receipt_roots.RECEIPTS_DIR)])
         self.assertEqual(len(self.roots()), 3)
 
-    def test_unreadable_categories_fall_back_to_fixed_roots(self):
+    def test_unreadable_rules_fall_back_to_fixed_roots(self):
         self.cats.write_text("{ not json", encoding="utf-8")
         self.assertEqual([r["label"] for r in self.roots()],
                          ["קבלות", "לטיפול ידני", "Japanologia"])
